@@ -1,8 +1,8 @@
 # Builds the BDO Visit Tracker native apps.
 #  - Android: an installable APK, uploaded as a workflow artifact ("bdo-visit-tracker-android").
 #    Signed release APK when the BDO_ANDROID_* secrets exist, otherwise a debug APK.
-#  - iOS: compiles the Xcode project for the simulator to prove it builds. Installing on an
-#    iPhone needs signing with an Apple account on a Mac (see bdo-visit-tracker/README.md).
+#  - iOS: an unsigned .ipa for real iPhones ("bdo-visit-tracker-ios-unsigned"). It must be
+#    signed with an Apple ID before it installs (Sideloadly/AltStore, or Xcode on a Mac).
 name: BDO Visit Tracker native apps
 
 on:
@@ -90,9 +90,18 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx cap sync ios
-      - name: Compile for iOS Simulator (unsigned)
+      - name: Build unsigned iPhone app (.ipa)
         run: |
           set -o pipefail
-          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
-            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO build | tail -40
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -30
+          mkdir -p out/Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/App.app out/Payload/
+          (cd out && zip -qry "BDO-Visit-Tracker-${{ github.run_number }}-unsigned.ipa" Payload && rm -rf Payload)
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bdo-visit-tracker-ios-unsigned
+          path: bdo-visit-tracker/out/*.ipa
+          retention-days: 30
