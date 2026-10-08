@@ -1,0 +1,107 @@
+# Builds the BDO Visit Tracker native apps.
+#  - Android: an installable APK, uploaded as a workflow artifact ("bdo-visit-tracker-android").
+#    Signed release APK when the BDO_ANDROID_* secrets exist, otherwise a debug APK.
+#  - iOS: an unsigned .ipa for real iPhones ("bdo-visit-tracker-ios-unsigned"). It must be
+#    signed with an Apple ID before it installs (Sideloadly/AltStore, or Xcode on a Mac).
+name: BDO Visit Tracker native apps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'bdo-visit-tracker/**'
+      - '.github/workflows/bdo-visit-tracker-native.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bdo-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bdo-visit-tracker
+    env:
+      HAS_KEYSTORE: ${{ secrets.BDO_ANDROID_KEYSTORE_BASE64 != '' }}
+      BDO_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bdo-visit-tracker/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+      - name: Build debug APK
+        if: env.HAS_KEYSTORE != 'true'
+        working-directory: bdo-visit-tracker/android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Build signed release APK
+        if: env.HAS_KEYSTORE == 'true'
+        working-directory: bdo-visit-tracker/android
+        env:
+          BDO_KEYSTORE_PASSWORD: ${{ secrets.BDO_ANDROID_KEYSTORE_PASSWORD }}
+          BDO_KEY_ALIAS: ${{ secrets.BDO_ANDROID_KEY_ALIAS }}
+          BDO_KEY_PASSWORD: ${{ secrets.BDO_ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.BDO_ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+          BDO_KEYSTORE_FILE="$RUNNER_TEMP/release.jks" ./gradlew assembleRelease --no-daemon
+          rm -f "$RUNNER_TEMP/release.jks"
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/*/*.apk out/
+          for f in out/*.apk; do mv "$f" "out/BDO-Visit-Tracker-${{ github.run_number }}-$(basename "$f")"; done
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bdo-visit-tracker-android
+          path: bdo-visit-tracker/out/*.apk
+          retention-days: 30
+
+  ios:
+    # Intel macOS pool: the arm64 pool repeatedly could not supply a runner for this repo.
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bdo-visit-tracker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bdo-visit-tracker/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync ios
+      - name: Build unsigned iPhone app (.ipa)
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -30
+          mkdir -p out/Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/App.app out/Payload/
+          (cd out && zip -qry "BDO-Visit-Tracker-${{ github.run_number }}-unsigned.ipa" Payload && rm -rf Payload)
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bdo-visit-tracker-ios-unsigned
+          path: bdo-visit-tracker/out/*.ipa
+          retention-days: 30

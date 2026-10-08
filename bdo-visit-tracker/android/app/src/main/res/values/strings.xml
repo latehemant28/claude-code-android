@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BDO Visit Tracker</string>
+    <string name="title_activity_main">BDO Visit Tracker</string>
+    <string name="package_name">com.bdovisittracker.app</string>
+    <string name="custom_url_scheme">com.bdovisittracker.app</string>
+</resources>
