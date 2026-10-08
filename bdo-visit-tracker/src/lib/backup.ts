@@ -128,28 +128,3 @@ export async function restoreBackup(b: Backup, mode: 'merge' | 'replace'): Promi
   });
   return { added, skipped };
 }
-
-export function downloadBlob(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-/** Opens the phone's share sheet (WhatsApp, Gmail, Drive...) when the browser supports sharing files. */
-export async function shareFile(blob: Blob, fileName: string, title: string): Promise<'shared' | 'unsupported' | 'cancelled'> {
-  const file = new File([blob], fileName, { type: blob.type });
-  const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
-  if (!nav.share || !nav.canShare?.({ files: [file] })) return 'unsupported';
-  try {
-    await nav.share({ files: [file], title });
-    return 'shared';
-  } catch (e) {
-    if ((e as DOMException)?.name === 'AbortError') return 'cancelled';
-    throw e;
-  }
-}

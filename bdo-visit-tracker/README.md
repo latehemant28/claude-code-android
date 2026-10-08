@@ -3,9 +3,18 @@
 A mobile-first app for recording business development visits, tracking follow-ups, and generating
 the **Annexure I: Visit Details for Liability Business Mobilization** Excel report.
 
-It is an installable web app (PWA). It works offline. Your records are stored **on your phone only**,
-in the browser's built-in database (IndexedDB), behind an app passcode. No server, cloud database or
-third-party service ever receives visit data, and no AI service is involved.
+It runs on **Android and iPhone** from one codebase, in three forms:
+
+| Form | Android | iPhone / iPad | Cost / requirements |
+|---|---|---|---|
+| **Native app** (Capacitor) | APK built automatically by GitHub Actions; install directly | Xcode project in `ios/`; build on a Mac | Android: free. iPhone: a Mac, and an Apple ID (free, re-sign every 7 days) or Apple Developer Program (US$99/yr, TestFlight/App Store) |
+| **Home-screen web app** (PWA) | Chrome → *Install app* | Safari → Share → *Add to Home Screen* | Free; needs the app hosted on HTTPS (GitHub Pages) |
+| **Browser** | Any browser | Safari | Free, but use one of the above for daily work |
+
+In every form, your records are stored **on your phone only**, in the app's built-in database
+(IndexedDB), behind an app passcode. No server, cloud database or third-party service ever receives
+visit data, and no AI service is involved. In the native apps, the data is also kept out of Google and
+iCloud automatic backups.
 
 ---
 
@@ -24,7 +33,7 @@ third-party service ever receives visit data, and no AI service is involved.
 | **Edit and delete** | Full editing. Deleting a visit asks for confirmation and also removes its follow-ups and attachments. |
 | **Follow-ups** | Several per visit. Each has an action, a responsible person, a due date, a status, completion notes and a result. You can complete, reschedule (history and reason are kept), reopen or delete. The tracker has *Overdue & today*, *Upcoming* and *Completed* tabs. The dashboard and navigation badge show what is due. |
 | **Attachments** | Photos, PDFs and Office files (up to 10 MB each) on the visit page, stored on the device. |
-| **Excel report** | A genuine `.xlsx` file built with ExcelJS. Export by today, week, month, chosen month, custom range, financial year, all visits, or selected visits. Steps: confirm the count, preview, fix incomplete visits, generate, download, then share. |
+| **Excel report** | A genuine `.xlsx` file built with ExcelJS. Export by today, week, month, chosen month, custom range, financial year, all visits, or selected visits. Steps: confirm the count, preview, fix incomplete visits, generate, then save or share. Where the file goes: browser → Downloads; native Android → Documents › BDO Visit Tracker; native iPhone → Files › On My iPhone › BDO Visit Tracker. **Share / Send…** opens the phone's share sheet (WhatsApp, Mail, Drive, Save to Files). |
 | **Dashboard** | Shows visits today and this month. For a chosen period it shows visits, departments, opportunities, accounts sourced, deposits mobilised and conversions, plus follow-ups due today and overdue, and recent visits. Opportunities (leads) are always counted separately from business. |
 | **Reports** | Visits by month, opportunity, zone, department and status for any period, shown as plain tables. |
 | **Security** | A passcode is required on first use. Only a salted PBKDF2-SHA-256 hash of it is stored. The app locks on reopen and after a configurable idle or background time. Repeated wrong attempts trigger a lockout. Search engines are told not to index the site. |
@@ -35,6 +44,11 @@ third-party service ever receives visit data, and no AI service is involved.
 
 - **No push notifications.** Follow-up reminders appear in the app (dashboard banner, red badge,
   tracker) when you open it. Nothing reaches the phone's notification bar.
+- **iPhone testing.** The iOS app is compiled by CI on a Mac, and the web app was checked at
+  iPhone size with a Safari user agent. Neither has been run on a real iPhone or in Safari's WebKit
+  engine. Test on your iPhone before relying on it.
+- **Android testing.** The APK was built and inspected, but this environment cannot run an
+  emulator, so it has not been launched on a device. The same web code passed all browser tests.
 - **No cloud sync between devices.** This is deliberate: it keeps official data off third-party servers.
   Use backup and restore to move data to a new phone. If your bank later approves a server, the data
   layer (`src/lib/repo.ts`) is the single place to connect one (for example Supabase/PostgreSQL).
@@ -109,6 +123,9 @@ Your records exist only on your phone, so **take a backup every week**:
 
   Either way, the restore is all-or-nothing: if it fails, nothing changes.
 - **New phone:** install the app, set a passcode, then restore the latest backup.
+- **The native app and the web app are separate.** Each has its own records, so use one. Moving
+  between them, or reinstalling, works through backup → install → restore. **Uninstalling the native
+  app deletes its data**, so take a backup first.
 - The app asks the browser for *persistent storage* so Android does not clear the data when space
   runs low. Settings shows whether this was granted. Clearing Chrome's "site data" for the app
   **will** delete the records.
@@ -153,14 +170,65 @@ npx vite preview --port 4173
 
 Then open `http://localhost:4173` in Chrome on the same phone. This must be `localhost`, not a LAN IP.
 
-### Installing it on your phone
+### Option C: native Android app (APK)
 
-Open the HTTPS address in **Chrome on Android**, then tap **⋮ → Add to Home screen / Install app**.
-It then opens full-screen like a normal app and works offline. On iPhone, use Safari → Share →
-*Add to Home Screen*.
+Every push that changes `bdo-visit-tracker/` runs the **BDO Visit Tracker native apps** workflow.
 
-> Records belong to the browser where they were created. A visit saved in the installed app is not
-> visible in a different browser, and vice versa. Always use the same installed app.
+1. On GitHub, open **Actions → BDO Visit Tracker native apps**, then the latest green run, and download
+   the **bdo-visit-tracker-android** artifact. It is a zip containing the APK.
+2. Copy the APK to the phone and open it. Allow "Install unknown apps" for your file manager or
+   browser when Android asks.
+3. Open **BDO Visit Tracker** from the app drawer and set your passcode.
+
+**Set up a release signing key once, before you store real data.** Without one, CI builds a *debug*
+APK. A debug APK works, but it is easier to inspect over USB debugging, and each new debug build may
+refuse to install over the previous one. To sign every build with your own key:
+
+```bash
+keytool -genkeypair -keystore bdo-release.jks -alias bdo -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 bdo-release.jks      # copy the output
+```
+
+Then, in the repository on GitHub, go to **Settings → Secrets and variables → Actions** and add:
+`BDO_ANDROID_KEYSTORE_BASE64` (the base64 text), `BDO_ANDROID_KEYSTORE_PASSWORD`,
+`BDO_ANDROID_KEY_ALIAS` (`bdo`) and `BDO_ANDROID_KEY_PASSWORD`. Later builds are signed release APKs
+that install over each other and keep your data. **Keep `bdo-release.jks` and its password safe and
+off the phone:** if you lose them, future updates cannot install over the app.
+
+To build the APK locally, you need Node 20+, JDK 21 and the Android SDK (`ANDROID_HOME`). Run
+`npm run android:apk`; the output is `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+### Option D: native iPhone app
+
+Apple only allows apps on an iPhone if they are signed on a Mac. The CI workflow proves the project
+compiles, but it cannot put the app on your phone.
+
+1. On a Mac with **Xcode 16 or later**: `git clone` the repo, `cd bdo-visit-tracker`, `npm ci`,
+   then `npm run ios:open`. Xcode opens the project.
+2. In Xcode, select the **App** target, then **Signing & Capabilities**. Choose your Team (sign in with
+   your Apple ID) and, if Xcode asks, change the bundle identifier to something unique.
+3. Connect the iPhone, select it as the run destination and press **Run**. On the iPhone, go to
+   **Settings → General → VPN & Device Management** and trust your developer certificate.
+
+With a free Apple ID, the app stops opening after **7 days** until you press Run again. With the
+Apple Developer Program you can use **TestFlight** (90-day builds, no cable), or publish privately
+through your organisation. Your bank's IT team may already have an enterprise/MDM channel for this.
+
+**No Mac?** Use the home-screen web app (Option A plus the steps below). On iPhone it has the same
+features. Files are saved through Safari's download prompt and the **Share / Send…** button.
+
+### Installing the web app on your phone
+
+- **Android (Chrome):** open the HTTPS address and tap **Install** on the dashboard banner, or
+  **⋮ → Install app**.
+- **iPhone (Safari, iOS 15 or later):** open the HTTPS address in **Safari** (not Chrome or Gmail's
+  browser), then tap **Share (□↑) → Add to Home Screen → Add**. Always open the app from the new icon.
+  Safari deletes the data of *websites* not used for 7 days, but Home Screen apps are exempt.
+- To save a report on iPhone: tap **Generate**. If Safari asks, tap Download; the file goes to
+  **Files › Downloads**. Or tap **Share / Send…** and choose Mail, WhatsApp or *Save to Files*.
+
+> Records belong to the app/browser where they were created. A visit saved in the Home Screen app is
+> not visible in Safari or Chrome tabs, or in the native app, and vice versa. Always use the same one.
 
 ---
 
@@ -173,7 +241,7 @@ It then opens full-screen like a normal app and works offline. On iPhone, use Sa
   overdue/due-today counts, metric separation, backup round-trip and merge without duplicates, and the
   Excel layout (40-row report: title, merges, headings, serials, dates, wrap, borders, print setup,
   signatures, no internal fields, optional time column).
-- `npm run e2e`: 51 checks in real Chromium at a 390×844 phone size. They cover:
+- `npm run e2e`: 53 checks in real Chromium at a 390×844 phone size, plus an iPhone Safari user agent. They cover:
   - passcode setup and lock;
   - automatic date and time;
   - saving a fully filled visit;
@@ -189,7 +257,12 @@ It then opens full-screen like a normal app and works offline. On iPhone, use Sa
   - backup download;
   - another browser profile seeing no data;
   - no horizontal scrolling on any screen;
+  - the iPhone install guidance;
   - no page errors.
+- Android: the debug and signed-release APKs were built locally. The manifest was checked for
+  cloud backup off, storage permission limited to Android 10 and older, and the bundled web app.
+  The release APK was confirmed signed and not debuggable. iOS: compiled by the CI workflow
+  (see the Actions tab).
 - The generated `.xlsx` files were also opened and printed to PDF with LibreOffice to check the print
   layout. They were not opened in Microsoft Excel itself during development. Please open one sample in
   Excel before the first official submission.

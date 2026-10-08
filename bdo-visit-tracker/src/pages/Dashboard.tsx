@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { InstallHint } from '../components/InstallHint';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { VisitCard } from '../components/VisitCard';
 import { Empty, Loading, rupees } from '../components/ui';
@@ -38,6 +39,8 @@ export function Dashboard({ settings }: { settings: Settings }) {
       </div>
 
       <a href="#/visits/new" className="btn-primary w-full py-4 text-lg shadow-md">+ Add Visit</a>
+
+      <InstallHint />
 
       {!m ? <Loading /> : (
         <>

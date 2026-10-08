@@ -321,6 +321,25 @@ try {
   check('different browser profile cannot see records (no shared server data)', !(await p2.content()).includes('Treasury') && (await p2.isVisible('text=Set a passcode')));
   await ctx2.close();
 
+  // iPhone screen + Safari user agent (Chromium engine: checks layout and iOS-specific UI only;
+  // real WebKit behaviour is not covered here).
+  const ctxIOS = await browser.newContext({
+    ...mobile,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
+  });
+  const pi = await ctxIOS.newPage();
+  pi.on('pageerror', (e) => errors.push('iOS: ' + e.message));
+  await pi.goto(BASE);
+  await pi.fill('#passcode', PASS);
+  await pi.fill('#passcode2', PASS);
+  await pi.click('button:has-text("Set passcode")');
+  await pi.waitForSelector('text=+ Add Visit');
+  check('iPhone (Safari UA) shows Add to Home Screen guidance', await pi.isVisible('text=Add this app to your Home Screen'));
+  await pi.click("text=Don't show again");
+  check('install hint can be dismissed', !(await pi.isVisible('text=Add this app to your Home Screen')));
+  await pi.screenshot({ path: `${OUT}/09-iphone-dashboard.png` });
+  await ctxIOS.close();
+
   check('no uncaught page errors', errors.length === 0, errors.join(' | '));
 } catch (e) {
   check('unexpected failure', false, e.stack);

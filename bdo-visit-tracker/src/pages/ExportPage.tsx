@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { PeriodPicker } from '../components/PeriodPicker';
 import { Field, Loading, PageHeader, useToast } from '../components/ui';
-import { downloadBlob, shareFile } from '../lib/backup';
+import { isNative, saveFile, shareFile } from '../lib/platform';
 import { formatDate, todayISO } from '../lib/dates';
 import { reportColumns, reportFileName, reportRow } from '../lib/reportLayout';
 import { resolvePeriod, type Period } from '../lib/periods';
@@ -57,8 +57,8 @@ export function ExportPage({ settings, ids }: { settings: Settings; ids?: number
       const slug = useSelection && visits.length ? `${visits[0].visitDate}_to_${visits[visits.length - 1].visitDate}_selected` : r.slug;
       const name = reportFileName(slug, includeTime);
       setFile({ blob, name });
-      downloadBlob(blob, name);
-      toast('success', `Excel report created with ${visits.length} visit${visits.length > 1 ? 's' : ''}: ${name}`);
+      const where = await saveFile(blob, name, settings.reportTitle);
+      toast('success', `Excel report created with ${visits.length} visit${visits.length > 1 ? 's' : ''}. ${where}`);
     } catch (e) {
       toast('error', `Could not create the Excel file: ${(e as Error).message}`);
     } finally {
@@ -70,7 +70,7 @@ export function ExportPage({ settings, ids }: { settings: Settings; ids?: number
     if (!file) return;
     try {
       const res = await shareFile(file.blob, file.name, settings.reportTitle);
-      if (res === 'unsupported') toast('info', 'Sharing files is not supported in this browser. Use Download, then share the file from your Downloads folder.');
+      if (res === 'unsupported') toast('info', 'This browser cannot share files. Use Download, then share the file from your Downloads / Files app.');
     } catch (e) {
       toast('error', `Sharing failed: ${(e as Error).message}`);
     }
@@ -172,15 +172,15 @@ export function ExportPage({ settings, ids }: { settings: Settings; ids?: number
       <section className="card space-y-2">
         <h2 className="font-semibold">4. Generate</h2>
         <button className="btn-primary w-full" disabled={busy || !visits?.length || !!custInvalid || (gaps.length > 0 && !ackGaps)} onClick={generate}>
-          {busy ? 'Creating Excel file…' : `Generate & download Excel (${visits?.length ?? 0} visits)`}
+          {busy ? 'Creating Excel file…' : `Generate ${isNative() ? '& save' : '& download'} Excel (${visits?.length ?? 0} visits)`}
         </button>
         {file && (
           <div className="grid grid-cols-2 gap-2">
-            <button className="btn-secondary" onClick={() => downloadBlob(file.blob, file.name)}>Download again</button>
-            <button className="btn-secondary" onClick={share}>Share…</button>
+            <button className="btn-secondary" onClick={() => saveFile(file.blob, file.name, settings.reportTitle).then((m) => toast('info', m))}>{isNative() ? 'Save again' : 'Download again'}</button>
+            <button className="btn-primary" onClick={share}>Share / Send…</button>
           </div>
         )}
-        {file && <p className="break-all text-xs text-slate-500">Saved as {file.name} in your Downloads folder.</p>}
+        {file && <p className="break-all text-xs text-slate-500">File name: {file.name}</p>}
       </section>
     </div>
   );

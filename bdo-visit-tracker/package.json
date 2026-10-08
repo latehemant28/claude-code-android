@@ -1,7 +1,7 @@
 {
   "name": "bdo-visit-tracker",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Record business development visits, track follow-ups, and generate the Annexure I Excel report.",
   "scripts": {
@@ -9,9 +9,18 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
-    "e2e": "node e2e/acceptance.mjs"
+    "e2e": "node e2e/acceptance.mjs",
+    "cap:sync": "npm run build && cap sync",
+    "android:apk": "npm run cap:sync && cd android && ./gradlew assembleDebug",
+    "ios:open": "npm run cap:sync && cap open ios",
+    "assets": "python3 scripts/make-native-assets.py"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/filesystem": "^8.1.4",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/share": "^8.0.3",
     "dexie": "^4.0.11",
     "dexie-react-hooks": "^1.1.7",
     "exceljs": "^4.4.0",
@@ -19,6 +28,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

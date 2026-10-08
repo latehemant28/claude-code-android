@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ConfirmDialog, Dialog, Field, PageHeader, useToast } from '../components/ui';
-import { createBackup, downloadBlob, parseBackup, restoreBackup, type Backup } from '../lib/backup';
+import { createBackup, parseBackup, restoreBackup, type Backup } from '../lib/backup';
+import { saveFile } from '../lib/platform';
 import { db, requestPersistentStorage } from '../lib/db';
 import { todayISO } from '../lib/dates';
 import { passcodeProblem, setPasscode, verifyPasscode } from '../lib/lock';
@@ -35,16 +36,16 @@ export function SettingsPage({ settings }: { settings: S }) {
   const doBackup = async () => {
     const b = await createBackup(true);
     const blob = new Blob([JSON.stringify(b)], { type: 'application/json' });
-    downloadBlob(blob, `bdo-visits-backup-${todayISO(settings.timeZone)}.json`);
+    const where = await saveFile(blob, `bdo-visits-backup-${todayISO(settings.timeZone)}.json`, 'BDO Visit Tracker backup');
     await setKV('lastBackupAt', b.exportedAt);
     setLastBackup(b.exportedAt);
-    toast('success', `Backup downloaded (${b.visits.length} visits). Keep it somewhere safe and private.`);
+    toast('success', `Backup created (${b.visits.length} visits). ${where} Keep it somewhere safe and private.`);
   };
 
   const fullExcel = async () => {
     const { buildFullDataWorkbook, workbookToBlob } = await import('../lib/excel');
     const wb = buildFullDataWorkbook(await db.visits.orderBy('visitDate').toArray(), await db.followUps.toArray(), settings.timeZone);
-    downloadBlob(await workbookToBlob(wb), `bdo-visits-all-data-${todayISO(settings.timeZone)}.xlsx`);
+    toast('info', await saveFile(await workbookToBlob(wb), `bdo-visits-all-data-${todayISO(settings.timeZone)}.xlsx`, 'All visit data'));
   };
 
   const pickFile = async (f?: File) => {

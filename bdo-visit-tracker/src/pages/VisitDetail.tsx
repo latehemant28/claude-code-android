@@ -4,6 +4,7 @@ import { FollowUpItem } from '../components/FollowUpItem';
 import { ConfirmDialog, Dialog, Empty, Field, Loading, PageHeader, StatusBadge, rupees, useToast } from '../components/ui';
 import { addDays, formatDate, formatTime, formatTimestamp, todayISO } from '../lib/dates';
 import { navigate } from '../lib/router';
+import { openFile } from '../lib/platform';
 import { addAttachment, addFollowUp, deleteAttachment, deleteVisit, followUpsForVisit, getVisit, listAttachments } from '../lib/repo';
 import type { Attachment, Settings } from '../lib/types';
 
@@ -29,11 +30,7 @@ export function VisitDetail({ id, settings }: { id: number; settings: Settings }
       </div>
     ) : null;
 
-  const open = (a: Attachment) => {
-    const url = URL.createObjectURL(a.data);
-    window.open(url, '_blank', 'noopener');
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  };
+  const open = (a: Attachment) => openFile(a.data, a.name).catch((e) => toast('error', `Could not open ${a.name}: ${(e as Error).message}`));
 
   return (
     <div>

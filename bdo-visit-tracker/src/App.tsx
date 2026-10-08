@@ -109,7 +109,7 @@ function Shell({ settings }: { settings: Settings }) {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-10 bg-brand-800 text-white shadow">
+      <header className="sticky top-0 z-10 bg-brand-800 pt-[env(safe-area-inset-top)] text-white shadow">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
           <a href="#/" className="flex-1 font-bold tracking-tight">BDO Visit Tracker</a>
           {!online && <span className="badge bg-amber-400 text-amber-950">Offline — saving on device</span>}
