@@ -39,6 +39,9 @@ class LlmTranslator(private val context: Context) {
         }
     }
 
+    /** For tests: use an already-created engine. */
+    internal suspend fun useEngine(engine: LlmEngine) = mutex.withLock { this.engine = engine }
+
     /** Streams the model's response to [prompt]. Collect sequentially. */
     fun generate(prompt: String): Flow<String> = flow {
         mutex.withLock {

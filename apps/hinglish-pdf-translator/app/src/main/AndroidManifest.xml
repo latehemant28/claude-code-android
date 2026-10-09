@@ -3,16 +3,27 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-        No storage permissions are needed: PDFs and model files are opened
-        through the Storage Access Framework (ACTION_OPEN_DOCUMENT), which
-        grants per-file read access to the URI the user picks.
-
-        The app is 100% offline. INTERNET is removed explicitly so no
-        library can merge it in through its own manifest.
+        100% offline: INTERNET is removed explicitly so no library can merge
+        it in. The model, the book and the translation never leave the phone.
     -->
     <uses-permission
         android:name="android.permission.INTERNET"
         tools:node="remove" />
+
+    <!-- Translation keeps running with the screen locked or the app in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Keeps the CPU awake while the screen is off (a foreground service alone does not). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- "Translating page 45 of 300..." (runtime permission on Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        Storage: none needed. Books are opened through the system file picker
+        (Storage Access Framework), and the finished PDF is written to
+        Downloads through MediaStore, which needs no permission on Android 10+
+        (this app's minSdk).
+    -->
 
     <application
         android:name=".HinglishApp"
@@ -25,9 +36,9 @@
         android:theme="@style/Theme.HinglishPdf">
 
         <!--
-            Lets MediaPipe use the GPU backend via OpenCL on devices that
-            ship it (required for apps targeting Android 12+). Marked
-            optional, so devices without it fall back to CPU.
+            Lets the AI runtimes use the GPU via OpenCL on devices that ship it
+            (required for apps targeting Android 12+). Optional, so devices
+            without it fall back to CPU.
         -->
         <uses-native-library
             android:name="libOpenCL.so"
@@ -42,12 +53,27 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            Long-running on-device AI work fits none of the predefined
+            foreground service types (dataSync and mediaProcessing are capped
+            at 6 hours a day on Android 15), so it is declared as specialUse.
+        -->
+        <service
+            android:name=".service.TranslationService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Translates a user-selected book page by page with an on-device AI model" />
+        </service>
     </application>
 
 </manifest>

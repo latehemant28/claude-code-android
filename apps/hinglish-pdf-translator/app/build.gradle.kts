@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
 }
 
 android {
@@ -12,7 +13,9 @@ android {
 
     defaultConfig {
         applicationId = "com.example.hinglishpdf"
-        minSdk = 26
+        // Android 10+: MediaStore saves to Downloads without any storage
+        // permission, and a 3B model needs a phone of that generation anyway.
+        minSdk = 29
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -44,6 +47,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     buildFeatures {
@@ -92,6 +99,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
+    // --- Room: page-by-page progress, survives crashes and reboots ---
+    implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.room:room-ktx:2.8.4")
+    ksp("androidx.room:room-compiler:2.8.4")
+    implementation("com.google.code.gson:gson:2.11.0") // Room column converters
+
     // --- Coroutines & Flow ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
@@ -109,4 +122,8 @@ dependencies {
 
     // --- Tests ---
     testImplementation("junit:junit:4.13.2")
+    // Runs the Room DAOs against real SQLite on the JVM.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
 }

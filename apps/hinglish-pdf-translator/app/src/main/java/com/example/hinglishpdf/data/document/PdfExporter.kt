@@ -1,107 +1,160 @@
 package com.example.hinglishpdf.data.document
 
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import com.example.hinglishpdf.data.db.PageEntity
 import java.io.OutputStream
+import kotlin.math.roundToInt
 
 /**
- * Writes translated blocks as a new A4 PDF with the original structure:
- * sized headings, bulleted and numbered lists with their nesting, quotes and
- * paragraphs. (A PDF's exact page layout cannot be reproduced with different
- * text, so this rebuilds the document rather than editing the original.)
+ * Writes the translated book as a new PDF with EXACTLY one output page per
+ * source page, at the source page's size: page 45 of the output is page 45
+ * of the original. Each page keeps its structure (sized headings, bulleted
+ * and numbered lists with their nesting, quotes, paragraphs) and carries its
+ * page number in the footer.
+ *
+ * Hinglish usually runs longer than English, so text that would overflow is
+ * shrunk to fit its page instead of spilling onto the next one.
  */
 object PdfExporter {
 
-    private const val PAGE_WIDTH = 595 // A4 in points
-    private const val PAGE_HEIGHT = 842
-    private const val MARGIN = 56f
-    private const val INDENT = 18f
-    private const val BODY_SIZE = 11f
+    private const val A4_WIDTH = 595f
+    private const val A4_HEIGHT = 842f
+    private const val MIN_SCALE = 0.45f
 
-    fun write(out: OutputStream, blocks: List<DocBlock>, translations: List<String?>) {
+    fun write(out: OutputStream, pages: List<PageEntity>) {
         val pdf = PdfDocument()
-        var pageNumber = 0
-        var page: PdfDocument.Page? = null
-        var y = 0f
-
-        fun newPage() {
-            page?.let(pdf::finishPage)
-            pageNumber++
-            page = pdf.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create())
-            y = MARGIN
+        try {
+            for (page in pages) writePage(pdf, page)
+            pdf.writeTo(out)
+        } finally {
+            pdf.close()
         }
-        newPage()
+    }
 
-        val contentWidth = PAGE_WIDTH - 2 * MARGIN
+    private fun writePage(pdf: PdfDocument, page: PageEntity) {
+        val width = if (page.width > 0f) page.width else A4_WIDTH
+        val height = if (page.height > 0f) page.height else A4_HEIGHT
+        val info = PdfDocument.PageInfo.Builder(width.roundToInt(), height.roundToInt(), page.pageNumber).create()
+        val pdfPage = pdf.startPage(info)
+        val canvas = pdfPage.canvas
+
+        val margin = width * 0.08f
+        val contentWidth = width - 2 * margin
+        val contentHeight = height - 2 * margin
+        val unit = width / A4_WIDTH // scale type with the page size
+
+        val blocks = page.sourceBlocks.mapIndexedNotNull { i, block ->
+            val text = page.translations?.getOrNull(i) ?: block.text
+            if (text.isBlank()) null else block to text
+        }
+
+        if (blocks.isEmpty()) {
+            note(canvas, "(No text on this page of the original)", width, height, unit)
+        } else {
+            // Largest scale at which the whole page fits.
+            var scale = 1f
+            var laidOut = layout(blocks, contentWidth, unit, scale)
+            while (laidOut.sumOf { (it.height + it.spaceBefore).toDouble() } > contentHeight && scale > MIN_SCALE) {
+                scale -= 0.05f
+                laidOut = layout(blocks, contentWidth, unit, scale)
+            }
+
+            var y = margin
+            for (item in laidOut) {
+                y += item.spaceBefore
+                item.marker?.let { (marker, paint) ->
+                    val baseline = y + item.layout.getLineBaseline(0)
+                    canvas.drawText(marker, margin + item.indent - paint.measureText("$marker "), baseline, paint)
+                }
+                canvas.save()
+                canvas.translate(margin + item.indent, y)
+                item.layout.draw(canvas)
+                canvas.restore()
+                y += item.height
+            }
+        }
+
+        // Footer page number, so pages can be matched with the original at a glance.
+        val footer = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
+            textSize = 9f * unit
+            color = Color.GRAY
+        }
+        val label = page.pageNumber.toString()
+        canvas.drawText(label, (width - footer.measureText(label)) / 2, height - margin / 2, footer)
+
+        pdf.finishPage(pdfPage)
+    }
+
+    private class Item(
+        val layout: StaticLayout,
+        val indent: Float,
+        val marker: Pair<String, TextPaint>?,
+        val spaceBefore: Float,
+    ) {
+        val height: Float get() = layout.height.toFloat()
+    }
+
+    private fun layout(blocks: List<Pair<DocBlock, String>>, contentWidth: Float, unit: Float, scale: Float): List<Item> {
+        val body = 11f * unit * scale
+        val indentStep = 18f * unit * scale
         var previous: DocBlock? = null
-
-        blocks.forEachIndexed { index, block ->
-            val text = translations.getOrNull(index) ?: block.text
-            if (text.isBlank()) return@forEachIndexed
-
-            val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG)
+        return blocks.map { (block, text) ->
+            val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
             var indent = 0f
             var marker: String? = null
             when (block.kind) {
                 BlockKind.HEADING -> {
-                    paint.textSize = when (block.level) { 1 -> 20f; 2 -> 16f; 3 -> 14f; else -> 12f }
+                    paint.textSize = body * when (block.level) { 1 -> 1.8f; 2 -> 1.45f; 3 -> 1.25f; else -> 1.1f }
                     paint.typeface = Typeface.DEFAULT_BOLD
                 }
                 BlockKind.BULLET, BlockKind.NUMBERED -> {
-                    paint.textSize = BODY_SIZE
-                    indent = INDENT * (block.level + 1)
+                    paint.textSize = body
+                    indent = indentStep * (block.level + 1)
                     marker = if (block.kind == BlockKind.BULLET) bulletFor(block.level) else block.marker
                 }
                 BlockKind.QUOTE -> {
-                    paint.textSize = BODY_SIZE
+                    paint.textSize = body
                     paint.typeface = Typeface.create(Typeface.SERIF, Typeface.ITALIC)
-                    indent = INDENT
+                    indent = indentStep
                 }
                 BlockKind.CODE -> {
-                    paint.textSize = 9.5f
+                    paint.textSize = body * 0.85f
                     paint.typeface = Typeface.MONOSPACE
                 }
-                BlockKind.PARAGRAPH -> paint.textSize = BODY_SIZE
+                BlockKind.PARAGRAPH -> paint.textSize = body
             }
 
             val isList = block.kind == BlockKind.BULLET || block.kind == BlockKind.NUMBERED
             val prevIsList = previous?.kind == BlockKind.BULLET || previous?.kind == BlockKind.NUMBERED
-            y += when {
+            val spaceBefore = when {
                 previous == null -> 0f
-                block.kind == BlockKind.HEADING -> paint.textSize * 0.9f
-                isList && prevIsList -> 3f
-                else -> 8f
-            }
-
-            val width = (contentWidth - indent).toInt()
-            val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1.2f)
-                .build()
-
-            for (line in 0 until layout.lineCount) {
-                val lineHeight = (layout.getLineBottom(line) - layout.getLineTop(line)).toFloat()
-                if (y + lineHeight > PAGE_HEIGHT - MARGIN) newPage()
-                val baseline = y + (layout.getLineBaseline(line) - layout.getLineTop(line))
-                val canvas = page!!.canvas
-                if (line == 0 && marker != null) {
-                    val markerPaint = TextPaint(paint)
-                    val markerWidth = markerPaint.measureText("$marker ")
-                    canvas.drawText(marker, MARGIN + indent - markerWidth, baseline, markerPaint)
-                }
-                val start = layout.getLineStart(line)
-                val end = layout.getLineEnd(line)
-                canvas.drawText(text, start, end, MARGIN + indent, baseline, paint)
-                y += lineHeight
+                block.kind == BlockKind.HEADING -> paint.textSize * 0.8f
+                isList && prevIsList -> body * 0.25f
+                else -> body * 0.7f
             }
             previous = block
-        }
 
-        page?.let(pdf::finishPage)
-        pdf.writeTo(out)
-        pdf.close()
+            val width = (contentWidth - indent).toInt().coerceAtLeast(1)
+            val staticLayout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setLineSpacing(0f, 1.15f)
+                .setIncludePad(false)
+                .build()
+            Item(staticLayout, indent, marker?.let { it to TextPaint(paint) }, spaceBefore)
+        }
+    }
+
+    private fun note(canvas: android.graphics.Canvas, text: String, width: Float, height: Float, unit: Float) {
+        val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG).apply {
+            textSize = 10f * unit
+            color = Color.GRAY
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+        }
+        canvas.drawText(text, (width - paint.measureText(text)) / 2, height / 2, paint)
     }
 }

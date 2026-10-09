@@ -1,32 +1,34 @@
 package com.example.hinglishpdf.data.llm
 
 import com.example.hinglishpdf.data.document.BlockKind
+import com.example.hinglishpdf.data.translate.TargetLanguage
 import com.example.hinglishpdf.data.translate.TranslationUnit
 
 /**
- * Builds the translation prompt and parses the model's answer.
+ * Builds the prompt for one page and parses the model's answer.
  *
- * Every block goes in as one line tagged with an ID and a Markdown-style
- * marker (`[3] ## Heading`, `[4] - bullet`, `[5] 2. step`). The model answers
- * line by line with the same IDs, so each translation can be matched back to
- * its block even if the model drops a marker or a line. The original
- * markers are re-applied by the app, never trusted from the model.
+ * The page goes in as one line per block, tagged with an ID and a
+ * Markdown-style marker (`[3] ## Heading`, `[4] - bullet`, `[5] 2. step`).
+ * The model answers line by line with the same IDs, so each translation is
+ * matched back to its heading, bullet or paragraph even if the model drops a
+ * marker or a line. The original markers are re-applied by the app, never
+ * trusted from the model.
+ *
+ * Prompt layout: the style guidelines, the page-format rules with a worked
+ * example, then the book-translation instruction followed by the page.
  */
 object HinglishPrompt {
 
-    val GUIDELINES = """
-        Translate the document lines below into Hinglish.
-
+    fun guidelines(language: TargetLanguage): String = """
         Guidelines:
-        - Vocabulary: Keep technical terms, proper nouns, and industry jargon in English. Translate everyday verbs, connectors, and descriptive words into Roman Hindi (e.g., kaam, lekin, zaroori, samajh).
+        - Vocabulary: Keep technical terms, proper nouns, and industry jargon in English. Translate everyday verbs, connectors, and descriptive words into Roman ${language.baseLanguage} (e.g., ${language.vocabularyExamples}).
         - Script: Use 100% English (Latin) letters. Do NOT use the Devanagari script.
-        - Flow: The output should read like a natural conversation between modern bilingual speakers (e.g., "Yeh process start karne ke liye, aapko next button par click karna hoga").
-        - Formatting: Strictly maintain the original structure, including headings, bullet points, numbering, and paragraph breaks.
+        - Flow: The output should read like a natural conversation between modern bilingual speakers (e.g., "${language.flowExample}").
+        - Formatting: Strictly maintain the original page's structure, including headings, bullet points, numbering, and paragraph breaks.
 
-        Output rules:
-        - Every input line starts with an ID like [7]. Write exactly one output line for every input line, starting with the same ID, in the same order. Never merge, split, skip or add lines.
-        - Keep the marker after the ID (#, -, 1., >) exactly as it is.
-        - Output ONLY the translated lines, with no introduction or notes.
+        Page format:
+        - The page is given one block per line. Every line starts with an ID like [7], then its marker: # for a heading, - for a bullet point, 1. for a numbered item, > for a quote, nothing for a paragraph.
+        - Write exactly one output line for every input line, starting with the same ID and the same marker, in the same order. Never merge, split, skip or add lines.
 
         Example input:
         [1] ## Getting Started
@@ -35,15 +37,23 @@ object HinglishPrompt {
 
         Example output:
         [1] ## Getting Started
-        [2] - Setup continue karne ke liye Next button par click karein.
-        [3] Yeh step zaroori hai kyunki isse aapki settings save hoti hain.
+        [2] - ${language.exampleBullet}
+        [3] ${language.exampleParagraph}
     """.trimIndent()
 
-    fun build(units: List<TranslationUnit>): String = buildString {
-        append(GUIDELINES)
-        append("\n\nInput:\n")
+    /** The per-page instruction, word for word, with the chosen language filled in. */
+    fun instruction(language: TargetLanguage): String =
+        "Translate the following text into natural, conversational ${language.label} using ONLY the " +
+            "Latin/English alphabet. Keep technical terms in English. Do not output Devanagari script. " +
+            "Preserve all paragraphs, bullet points, and line breaks exactly as they appear in the source " +
+            "text. Output ONLY the translated text:"
+
+    fun build(units: List<TranslationUnit>, language: TargetLanguage): String = buildString {
+        append(guidelines(language))
+        append("\n\n")
+        append(instruction(language))
+        append('\n')
         units.forEachIndexed { i, unit -> append(line(i + 1, unit)).append('\n') }
-        append("\nOutput:")
     }
 
     private fun line(id: Int, unit: TranslationUnit): String {

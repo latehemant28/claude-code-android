@@ -18,8 +18,12 @@ import java.io.Writer
 
 class PdfPasswordProtectedException : IOException("This PDF is password-protected.")
 
+/** One source page: its size in points and its structure. Blank/image pages have no blocks. */
+data class PdfPage(val width: Float, val height: Float, val blocks: List<DocBlock>)
+
 /**
- * Reads a PDF into structured blocks (headings, lists, paragraphs).
+ * Reads a PDF strictly page by page into structured blocks (headings,
+ * bulleted/numbered items, paragraphs).
  *
  * PDFBox reports every line with its glyph positions and fonts; those are
  * handed to [PdfLayoutAnalyzer], which works out the structure.
@@ -27,10 +31,10 @@ class PdfPasswordProtectedException : IOException("This PDF is password-protecte
  */
 class PdfTextExtractor(private val context: Context) {
 
-    suspend fun readBlocks(file: File, onPage: (page: Int, pageCount: Int) -> Unit): List<DocBlock> =
+    suspend fun readPages(file: File, onPage: (page: Int, pageCount: Int) -> Unit): List<PdfPage> =
         withContext(Dispatchers.IO) {
             // Buffer the parsed document in a temp file instead of the Java heap,
-            // so large PDFs do not compete with the LLM for memory.
+            // so a 300-page book does not compete with the LLM for memory.
             val memory = MemoryUsageSetting.setupTempFileOnly().setTempDir(context.cacheDir)
             val document = try {
                 PDDocument.load(file, memory)
@@ -41,14 +45,18 @@ class PdfTextExtractor(private val context: Context) {
             document.use { doc ->
                 val collector = LineCollector()
                 val pageCount = doc.numberOfPages
+                val sizes = ArrayList<Pair<Float, Float>>(pageCount)
                 for (page in 1..pageCount) {
                     currentCoroutineContext().ensureActive()
+                    val box = doc.getPage(page - 1).mediaBox
+                    sizes += box.width to box.height
                     collector.startPage = page
                     collector.endPage = page
                     collector.writeText(doc, NullWriter)
                     onPage(page, pageCount)
                 }
-                PdfLayoutAnalyzer.analyze(collector.lines)
+                PdfLayoutAnalyzer.analyzeByPage(collector.lines, pageCount)
+                    .mapIndexed { i, blocks -> PdfPage(sizes[i].first, sizes[i].second, blocks) }
             }
         }
 

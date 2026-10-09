@@ -1,6 +1,7 @@
 package com.example.hinglishpdf.data.llm
 
 import com.example.hinglishpdf.data.document.BlockKind
+import com.example.hinglishpdf.data.translate.TargetLanguage
 import com.example.hinglishpdf.data.translate.TranslationUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,15 +21,31 @@ class HinglishPromptTest {
     )
 
     @Test
-    fun `prompt carries the guidelines and one tagged line per block`() {
-        val prompt = HinglishPrompt.build(units)
+    fun `prompt carries the guidelines, the page instruction and one tagged line per block`() {
+        val prompt = HinglishPrompt.build(units, TargetLanguage.HINGLISH)
         assertTrue(prompt.contains("Do NOT use the Devanagari script"))
-        assertTrue(prompt.contains("kaam, lekin, zaroori, samajh"))
+        assertTrue(prompt.contains("into Roman Hindi (e.g., kaam, lekin, zaroori, samajh)"))
+        assertTrue(
+            prompt.contains(
+                "Translate the following text into natural, conversational Hinglish using ONLY the " +
+                    "Latin/English alphabet. Keep technical terms in English. Do not output Devanagari " +
+                    "script. Preserve all paragraphs, bullet points, and line breaks exactly as they " +
+                    "appear in the source text. Output ONLY the translated text:\n[1] ## Getting started\n",
+            ),
+        )
         assertTrue(prompt.contains("[1] ## Getting started\n"))
         assertTrue(prompt.contains("[2] - Open the app\n"))
         assertTrue(prompt.contains("[3]   - Tap settings\n"))
         assertTrue(prompt.contains("[4] 3. Save the file\n"))
         assertTrue(prompt.contains("[5] It is important.\n"))
+    }
+
+    @Test
+    fun `minglish prompt asks for Roman Marathi`() {
+        val prompt = HinglishPrompt.build(units, TargetLanguage.MINGLISH)
+        assertTrue(prompt.contains("into Roman Marathi"))
+        assertTrue(prompt.contains("natural, conversational Minglish using ONLY"))
+        assertTrue(prompt.contains("karnyasathi"))
     }
 
     @Test

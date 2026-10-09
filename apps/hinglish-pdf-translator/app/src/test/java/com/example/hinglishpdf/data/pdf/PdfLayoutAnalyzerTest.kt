@@ -71,4 +71,31 @@ class PdfLayoutAnalyzerTest {
             PdfLayoutAnalyzer.analyze(lines),
         )
     }
+
+    @Test
+    fun `page mode never merges across a page break and keeps blank pages`() {
+        val lines = listOf(
+            PdfLine("Chapter One", 1, 72f, 80f, 20f, true, 842f),
+            PdfLine("This sentence runs on to the", 1, 72f, 120f, 11f, false, 842f),
+            PdfLine("next page without stopping.", 3, 72f, 80f, 11f, false, 842f),
+            PdfLine("• A bullet on page three", 3, 72f, 100f, 11f, false, 842f),
+        )
+        val pages = PdfLayoutAnalyzer.analyzeByPage(lines, pageCount = 3)
+        assertEquals(3, pages.size)
+        assertEquals(
+            listOf(
+                DocBlock(BlockKind.HEADING, "Chapter One", level = 1),
+                DocBlock(BlockKind.PARAGRAPH, "This sentence runs on to the"),
+            ),
+            pages[0],
+        )
+        assertEquals(emptyList<DocBlock>(), pages[1]) // e.g. a full-page picture
+        assertEquals(
+            listOf(
+                DocBlock(BlockKind.PARAGRAPH, "next page without stopping."),
+                DocBlock(BlockKind.BULLET, "A bullet on page three", level = 0),
+            ),
+            pages[2],
+        )
+    }
 }

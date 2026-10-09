@@ -19,3 +19,8 @@
 -dontwarn com.google.ai.edge.litertlm.**
 -keep class com.google.gson.** { *; }
 -dontwarn com.google.gson.**
+
+# Page structure is stored in Room as JSON via Gson, which reads field names
+# reflectively: keep the stored model classes intact.
+-keep class com.example.hinglishpdf.data.document.DocBlock { *; }
+-keep enum com.example.hinglishpdf.data.document.BlockKind { *; }

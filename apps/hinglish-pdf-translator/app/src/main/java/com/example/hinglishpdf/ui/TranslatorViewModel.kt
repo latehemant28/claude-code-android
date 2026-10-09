@@ -1,6 +1,5 @@
 package com.example.hinglishpdf.ui
 
-import android.content.ContentResolver
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -8,252 +7,162 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.hinglishpdf.HinglishApp
-import com.example.hinglishpdf.data.TranslationEvent
-import com.example.hinglishpdf.data.TranslationRepository
-import com.example.hinglishpdf.data.document.DocFormat
-import com.example.hinglishpdf.data.document.DocumentFormatter
-import com.example.hinglishpdf.data.document.PdfExporter
-import com.example.hinglishpdf.data.document.SourceDocument
-import com.example.hinglishpdf.data.epub.EpubBook
-import com.example.hinglishpdf.data.llm.LlmTranslator
-import com.example.hinglishpdf.data.llm.ModelFileManager
+import com.example.hinglishpdf.data.db.BookEntity
+import com.example.hinglishpdf.data.db.BookStatus
+import com.example.hinglishpdf.data.db.BookWithProgress
+import com.example.hinglishpdf.data.db.PageEntity
+import com.example.hinglishpdf.data.llm.ModelStatus
+import com.example.hinglishpdf.data.translate.TargetLanguage
+import com.example.hinglishpdf.service.LiveStatus
+import com.example.hinglishpdf.service.TranslationService
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.IOException
-
-sealed interface ModelStatus {
-    /** Looking for, copying, importing or loading a model. */
-    data class Preparing(val message: String, val progress: Float? = null) : ModelStatus
-    data object Missing : ModelStatus
-    data class Ready(val fileName: String, val backend: String) : ModelStatus
-    data class Failed(val message: String) : ModelStatus
-}
-
-enum class Phase { Idle, Reading, Translating, Done, Cancelled, Failed }
+import java.io.File
 
 data class TranslatorUiState(
     val model: ModelStatus = ModelStatus.Preparing("Looking for a model…"),
-    val document: SourceDocument? = null,
-    val phase: Phase = Phase.Idle,
-    val progressLabel: String = "",
-    /** 0..1, or null for an indeterminate indicator. */
-    val progress: Float? = null,
-    /** Translated text per block of [document]; null = not translated yet. */
-    val translations: List<String?> = emptyList(),
-    /** Model output for the chunk being generated right now. */
-    val liveText: String = "",
-    val error: String? = null,
+    val language: TargetLanguage = TargetLanguage.HINGLISH,
+    val books: List<BookWithProgress> = emptyList(),
+    val selectedBookId: Long? = null,
+    val live: LiveStatus = LiveStatus(),
+    val importing: Boolean = false,
     /** One-shot message for a snackbar. */
     val message: String? = null,
 ) {
-    val isBusy: Boolean get() = phase == Phase.Reading || phase == Phase.Translating
-    val canSelectDocument: Boolean get() = model is ModelStatus.Ready && !isBusy
-    val canChangeModel: Boolean get() = model !is ModelStatus.Preparing && !isBusy
-    val hasOutput: Boolean get() = translations.any { it != null }
+    val selected: BookWithProgress?
+        get() = books.firstOrNull { it.book.id == selectedBookId } ?: books.firstOrNull()
+
+    val canAddBook: Boolean get() = model is ModelStatus.Ready && !importing
+
+    fun isRunning(book: BookEntity) = live.running && live.bookId == book.id
 }
 
-class TranslatorViewModel(
-    private val modelFiles: ModelFileManager,
-    private val translator: LlmTranslator,
-    private val repository: TranslationRepository,
-    private val contentResolver: ContentResolver,
-    private val appScope: CoroutineScope,
-) : ViewModel() {
+private data class LocalState(
+    val language: TargetLanguage = TargetLanguage.HINGLISH,
+    val selectedBookId: Long? = null,
+    val importing: Boolean = false,
+    val message: String? = null,
+)
 
-    private val _state = MutableStateFlow(TranslatorUiState())
-    val state: StateFlow<TranslatorUiState> = _state.asStateFlow()
+@OptIn(ExperimentalCoroutinesApi::class)
+class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
-    private var modelJob: Job? = null
-    private var translationJob: Job? = null
+    private val local = MutableStateFlow(LocalState())
+
+    val state: StateFlow<TranslatorUiState> = combine(
+        app.modelController.status,
+        app.db.bookDao().observeAll(),
+        app.monitor.status,
+        local,
+    ) { model, books, live, l ->
+        TranslatorUiState(model, l.language, books, l.selectedBookId, live, l.importing, l.message)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TranslatorUiState())
+
+    /** Translated pages of the selected book, straight from Room (updates as each page is saved). */
+    val pages: StateFlow<List<PageEntity>> = state
+        .map { it.selected?.book?.id }
+        .distinctUntilChanged()
+        .flatMapLatest { id -> if (id == null) flowOf(emptyList()) else app.db.pageDao().observeTranslated(id) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
-        prepareModel(importUri = null)
-    }
-
-    /** Re-scan storage for a model (e.g. after a download or `adb push`). */
-    fun retryModelSearch() = prepareModel(importUri = null)
-
-    /** Copy a model the user picked with the system file picker, then load it. */
-    fun importModel(uri: Uri) = prepareModel(importUri = uri)
-
-    private fun prepareModel(importUri: Uri?) {
-        if (_state.value.isBusy) return
-        modelJob?.cancel()
-        modelJob = viewModelScope.launch {
-            try {
-                setModel(ModelStatus.Preparing("Looking for a model…"))
-                val file = if (importUri != null) {
-                    modelFiles.importModel(importUri) { p -> setModel(ModelStatus.Preparing("Importing model…", p)) }
-                } else {
-                    modelFiles.findModel { p -> setModel(ModelStatus.Preparing("Copying bundled model…", p)) }
-                }
-                if (file == null) {
-                    setModel(ModelStatus.Missing)
-                    return@launch
-                }
-                setModel(ModelStatus.Preparing("Loading ${file.name} into memory… (up to a minute)"))
-                translator.load(file)
-                setModel(ModelStatus.Ready(file.name, translator.backendName ?: "CPU"))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                // OutOfMemoryError included: a model too big for this phone.
-                setModel(ModelStatus.Failed(e.message ?: e.javaClass.simpleName))
-            }
-        }
-    }
-
-    fun translate(uri: Uri) {
-        if (!_state.value.canSelectDocument) return
-        translationJob = viewModelScope.launch {
-            _state.update {
-                it.copy(
-                    document = null, phase = Phase.Reading, progressLabel = "Opening document…",
-                    progress = null, translations = emptyList(), liveText = "", error = null,
-                )
-            }
-            try {
-                repository.translate(uri).collect(::onEvent)
-                _state.update {
-                    it.copy(
-                        phase = Phase.Done,
-                        progressLabel = "Done: ${it.document?.title ?: "document"} is in Hinglish",
-                        progress = 1f,
-                        liveText = "",
-                        translations = withOriginalsFilled(it, upTo = Int.MAX_VALUE),
-                    )
-                }
-            } catch (e: CancellationException) {
-                _state.update { it.copy(phase = Phase.Cancelled, progressLabel = "Cancelled", liveText = "") }
-                throw e
-            } catch (e: Throwable) {
-                _state.update {
-                    it.copy(
-                        phase = Phase.Failed,
-                        progressLabel = "Translation stopped",
-                        liveText = "",
-                        error = e.message ?: e.javaClass.simpleName,
-                    )
-                }
-            }
-        }
-    }
-
-    fun cancelTranslation() {
-        translationJob?.cancel()
-    }
-
-    private fun onEvent(event: TranslationEvent) {
-        when (event) {
-            is TranslationEvent.Reading -> _state.update {
-                it.copy(progressLabel = event.label, progress = event.fraction)
-            }
-
-            is TranslationEvent.DocumentReady -> _state.update {
-                it.copy(
-                    document = event.document,
-                    translations = List(event.document.blocks.size) { null },
-                )
-            }
-
-            is TranslationEvent.ChunkStarted -> _state.update {
-                it.copy(
-                    phase = Phase.Translating,
-                    progressLabel = "Translating chunk ${event.chunkNumber} of ${event.chunkCount}...",
-                    progress = (event.chunkNumber - 1).toFloat() / event.chunkCount,
-                    liveText = "",
-                )
-            }
-
-            is TranslationEvent.TextGenerated -> _state.update { it.copy(liveText = it.liveText + event.text) }
-
-            is TranslationEvent.ChunkFinished -> _state.update {
-                val updated = it.translations.toMutableList()
-                event.blocks.forEach { (index, text) -> updated[index] = text }
-                val withNew = it.copy(translations = updated)
-                it.copy(
-                    translations = withOriginalsFilled(withNew, upTo = event.blocks.keys.max()),
-                    progress = event.chunkNumber.toFloat() / event.chunkCount,
-                    liveText = "",
-                )
-            }
-        }
-    }
-
-    /** Shows code and other untranslatable blocks (as-is) once translation has passed them. */
-    private fun withOriginalsFilled(state: TranslatorUiState, upTo: Int): List<String?> {
-        val blocks = state.document?.blocks ?: return state.translations
-        return state.translations.mapIndexed { i, t ->
-            t ?: if (i <= upTo && !blocks[i].isTranslatable) blocks[i].text else null
-        }
-    }
-
-    /** Plain text with bullets, numbering and paragraph breaks, for the clipboard. */
-    fun plainText(): String {
-        val s = _state.value
-        val blocks = s.document?.blocks ?: return ""
-        return DocumentFormatter.toPlainText(blocks, s.translations.map { it ?: "" })
-    }
-
-    /** Saves the translation in the source format: EPUB -> EPUB copy, PDF -> new PDF. */
-    fun export(target: Uri) {
-        val s = _state.value
-        val document = s.document ?: return
+        app.modelController.refresh()
+        // After a crash, a force-stop or a reboot: pick up where we stopped.
         viewModelScope.launch {
-            val result = try {
-                withContext(Dispatchers.IO) {
-                    val out = contentResolver.openOutputStream(target, "wt")
-                        ?: throw IOException("Could not open the destination file.")
-                    out.use {
-                        when (document.format) {
-                            DocFormat.EPUB -> EpubBook.writeTranslated(document.file, it, s.translations)
-                            DocFormat.PDF -> PdfExporter.write(it, document.blocks, s.translations)
-                        }
-                    }
-                }
-                "Saved"
+            if (!app.monitor.status.value.running && app.db.bookDao().nextResumable() != null) {
+                TranslationService.start(app)
+            }
+        }
+    }
+
+    fun setLanguage(language: TargetLanguage) = local.update { it.copy(language = language) }
+
+    fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
+
+    fun importModel(uri: Uri) = app.modelController.refresh(uri)
+
+    fun rescanModel() = app.modelController.refresh()
+
+    /** Adds the picked book to the queue and starts the background service. */
+    fun addBook(uri: Uri) {
+        if (!state.value.canAddBook) return
+        local.update { it.copy(importing = true) }
+        viewModelScope.launch {
+            try {
+                val imported = app.importer.copyIn(uri)
+                val id = app.db.bookDao().insert(
+                    BookEntity(
+                        title = imported.title,
+                        format = imported.format,
+                        sourcePath = imported.file.absolutePath,
+                        language = local.value.language,
+                    ),
+                )
+                local.update { it.copy(selectedBookId = id) }
+                TranslationService.start(app)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                "Could not save: ${e.message}"
+                showMessage(e.message ?: "Could not open the book")
+            } finally {
+                local.update { it.copy(importing = false) }
             }
-            _state.update { it.copy(message = result) }
         }
     }
 
-    fun showMessage(text: String) = _state.update { it.copy(message = text) }
+    fun pause() = TranslationService.pause(app)
 
-    fun messageShown() = _state.update { it.copy(message = null) }
-
-    private fun setModel(status: ModelStatus) = _state.update { it.copy(model = status) }
-
-    override fun onCleared() {
-        // viewModelScope is already cancelled; release the 1-3 GB model once
-        // any in-flight generation has wound down.
-        appScope.launch { translator.close() }
+    /** Continues from the first page without a saved translation. */
+    fun resume(book: BookEntity) {
+        viewModelScope.launch {
+            app.db.bookDao().setStatus(book.id, BookStatus.QUEUED)
+            TranslationService.start(app)
+        }
     }
+
+    /** Writes the book (translated so far) to Downloads. */
+    fun saveToDownloads(book: BookEntity) {
+        app.appScope.launch {
+            val message = try {
+                "Saved to Downloads: ${app.exporter.exportToDownloads(book).displayName}"
+            } catch (e: Exception) {
+                "Could not save: ${e.message}"
+            }
+            showMessage(message)
+        }
+    }
+
+    fun delete(book: BookEntity) {
+        if (state.value.isRunning(book)) return
+        viewModelScope.launch {
+            app.db.bookDao().delete(book.id) // pages go with it (ON DELETE CASCADE)
+            File(book.sourcePath).delete()
+            local.update { if (it.selectedBookId == book.id) it.copy(selectedBookId = null) else it }
+        }
+    }
+
+    /** All translated pages as plain text, with bullets, numbering and page breaks. */
+    fun plainText(): String =
+        pages.value.joinToString("\n\n") { page -> "— ${page.pageNumber} —\n\n${page.translatedText.orEmpty()}" }
+
+    fun showMessage(text: String) = local.update { it.copy(message = text) }
+
+    fun messageShown() = local.update { it.copy(message = null) }
 
     companion object {
         val Factory = viewModelFactory {
-            initializer {
-                val app = this[APPLICATION_KEY] as HinglishApp
-                val translator = LlmTranslator(app)
-                TranslatorViewModel(
-                    modelFiles = app.modelFileManager,
-                    translator = translator,
-                    repository = TranslationRepository(app.documentLoader, translator),
-                    contentResolver = app.contentResolver,
-                    appScope = app.appScope,
-                )
-            }
+            initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp) }
         }
     }
 }

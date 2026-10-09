@@ -45,7 +45,24 @@ object PdfLayoutAnalyzer {
 
     private data class Classified(val line: PdfLine, val type: LineType, val text: String, val marker: String)
 
-    fun analyze(rawLines: List<PdfLine>): List<DocBlock> {
+    /** Whole-document mode: paragraphs may run across page breaks. */
+    fun analyze(rawLines: List<PdfLine>): List<DocBlock> = analyzeWithPages(rawLines, splitPages = false).map { it.second }
+
+    /**
+     * Page mode: returns the blocks of each page (index 0 = page 1), never
+     * merging text across a page break, so page N of the output matches page
+     * N of the source. Font statistics are still taken from the whole book,
+     * so heading levels and list depths are consistent between pages.
+     */
+    fun analyzeByPage(rawLines: List<PdfLine>, pageCount: Int): List<List<DocBlock>> {
+        val pages = List(pageCount) { mutableListOf<DocBlock>() }
+        for ((page, block) in analyzeWithPages(rawLines, splitPages = true)) {
+            pages.getOrNull(page - 1)?.add(block)
+        }
+        return pages
+    }
+
+    private fun analyzeWithPages(rawLines: List<PdfLine>, splitPages: Boolean): List<Pair<Int, DocBlock>> {
         val lines = dropRunningHeadersAndFooters(rawLines.filter { it.text.isNotBlank() })
         if (lines.isEmpty()) return emptyList()
 
@@ -54,7 +71,7 @@ object PdfLayoutAnalyzer {
         val classified = lines.map { classify(it, bodySize) }
         val listDepths = listDepths(classified)
 
-        val blocks = mutableListOf<DocBlock>()
+        val blocks = mutableListOf<Pair<Int, DocBlock>>()
         var current: Classified? = null // first line of the block being built
         var previous: Classified? = null
         val text = StringBuilder()
@@ -63,7 +80,7 @@ object PdfLayoutAnalyzer {
             val start = current ?: return
             val content = text.toString().trim()
             if (content.isNotEmpty()) {
-                blocks += when (start.type) {
+                blocks += start.line.page to when (start.type) {
                     LineType.HEADING -> DocBlock(
                         BlockKind.HEADING, content,
                         level = headingLevels[sizeKey(start.line.fontSize)] ?: (headingLevels.size + 1).coerceAtMost(6),
@@ -83,7 +100,9 @@ object PdfLayoutAnalyzer {
 
         for (line in classified) {
             val prev = previous
-            val continues = current != null && prev != null && continuesBlock(current!!, prev, line, bodySize)
+            val pageBreak = splitPages && prev != null && prev.line.page != line.line.page
+            val continues = !pageBreak && current != null && prev != null &&
+                continuesBlock(current!!, prev, line, bodySize)
             if (!continues) {
                 flush()
                 current = line

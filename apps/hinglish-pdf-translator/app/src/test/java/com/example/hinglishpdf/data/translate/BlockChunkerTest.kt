@@ -49,8 +49,24 @@ class BlockChunkerTest {
     }
 
     @Test
-    fun `chunk size follows the model context`() {
-        assertEquals(350, BlockChunker.wordsFor(4096))
-        assertTrue(BlockChunker.wordsFor(1280) in 150..250)
+    fun `a full book page fits one prompt on a 4k model`() {
+        assertEquals(700, BlockChunker.wordsFor(4096))
+        assertTrue(BlockChunker.wordsFor(1280) in 120..200)
+        val page = (1..12).map { DocBlock(BlockKind.PARAGRAPH, words(45, "p$it") + ".") } // 540 words
+        assertEquals(1, BlockChunker.chunk(page, BlockChunker.wordsFor(4096)).size)
+    }
+
+    @Test
+    fun `epub sections keep every block once, in order`() {
+        val blocks = listOf(
+            DocBlock(BlockKind.HEADING, words(3), level = 1),
+            DocBlock(BlockKind.PARAGRAPH, words(30)),
+            DocBlock(BlockKind.CODE, "x = 1"),
+            DocBlock(BlockKind.BULLET, words(30)),
+            DocBlock(BlockKind.PARAGRAPH, words(90)),
+        )
+        val sections = BlockChunker.sections(blocks, maxWords = 64)
+        assertEquals(blocks, sections.flatten())
+        assertEquals(listOf(3, 1, 1), sections.map { it.size })
     }
 }
