@@ -12,8 +12,9 @@ import java.io.IOException
 import java.io.InputStream
 
 /**
- * Finds a MediaPipe-compatible model (`.task` or `.bin`) and makes sure it is
- * available as a real file, because MediaPipe loads models from a file path.
+ * Finds an on-device model (`.litertlm` for LiteRT-LM, `.task`/`.bin` for
+ * MediaPipe) and makes sure it is available as a real file, because both
+ * runtimes load models from a file path.
  *
  * Lookup order:
  *  1. Internal storage: `filesDir/models/` (where imports and asset copies land).
@@ -57,7 +58,7 @@ class ModelFileManager(private val context: Context) {
             } ?: ("model.task" to -1L)
 
             if (!isModelName(name)) {
-                throw IOException("\"$name\" is not a MediaPipe model. Pick a .task or .bin file.")
+                throw IOException("\"$name\" is not a supported model. Pick a .litertlm, .task or .bin file.")
             }
 
             val input = resolver.openInputStream(uri)
@@ -121,6 +122,6 @@ class ModelFileManager(private val context: Context) {
 
     private fun isModelName(name: String): Boolean {
         val lower = name.lowercase()
-        return lower.endsWith(".task") || lower.endsWith(".bin")
+        return lower.endsWith(".litertlm") || lower.endsWith(".task") || lower.endsWith(".bin")
     }
 }

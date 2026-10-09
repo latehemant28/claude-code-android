@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -44,10 +46,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
     }
@@ -55,7 +53,7 @@ android {
     // A bundled model must be stored uncompressed, otherwise it cannot be
     // streamed out of the APK and copying it costs twice the memory.
     androidResources {
-        noCompress += listOf("task", "bin", "tflite")
+        noCompress += listOf("task", "bin", "tflite", "litertlm")
     }
 
     packaging {
@@ -70,6 +68,12 @@ android {
             // dependency; PDF decryption never uses them.
             excludes += "org/bouncycastle/pqc/**"
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
@@ -89,12 +93,18 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
     // --- Coroutines & Flow ---
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
     // --- PDF text extraction (Apache PDFBox port for Android) ---
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
-    // --- On-device LLM inference (MediaPipe LLM Inference API) ---
+    // --- EPUB (XHTML) parsing and rewriting ---
+    implementation("org.jsoup:jsoup:1.18.3")
+
+    // --- On-device LLM inference ---
+    // LiteRT-LM runs .litertlm models (e.g. Llama 3.2 3B Instruct);
+    // MediaPipe runs .task/.bin models (e.g. Gemma 3 1B, Qwen 2.5 1.5B).
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
     implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
     // --- Tests ---

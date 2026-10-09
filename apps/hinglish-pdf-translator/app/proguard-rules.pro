@@ -12,3 +12,10 @@
 -dontwarn com.gemalto.jp2.**
 -dontwarn com.tom_roush.pdfbox.**
 -dontwarn javax.annotation.**
+
+# LiteRT-LM calls back into Kotlin from native code and (de)serialises
+# messages with Gson; keep it whole.
+-keep class com.google.ai.edge.litertlm.** { *; }
+-dontwarn com.google.ai.edge.litertlm.**
+-keep class com.google.gson.** { *; }
+-dontwarn com.google.gson.**

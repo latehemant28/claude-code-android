@@ -1,6 +1,7 @@
 package com.example.hinglishpdf
 
 import android.app.Application
+import com.example.hinglishpdf.data.document.DocumentLoader
 import com.example.hinglishpdf.data.llm.ModelFileManager
 import com.example.hinglishpdf.data.pdf.PdfTextExtractor
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -14,7 +15,7 @@ class HinglishApp : Application() {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val modelFileManager by lazy { ModelFileManager(this) }
-    val pdfTextExtractor by lazy { PdfTextExtractor(this) }
+    val documentLoader by lazy { DocumentLoader(this, PdfTextExtractor(this)) }
 
     override fun onCreate() {
         super.onCreate()

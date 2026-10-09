@@ -1,67 +1,123 @@
 package com.example.hinglishpdf.data.pdf
 
 import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
+import com.example.hinglishpdf.data.document.DocBlock
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
-
-/** Text of a single PDF page, 1-based. */
-data class PageText(val pageNumber: Int, val pageCount: Int, val text: String)
+import java.io.Writer
 
 class PdfPasswordProtectedException : IOException("This PDF is password-protected.")
 
 /**
- * Extracts text from a PDF chosen via the Storage Access Framework,
- * one page at a time, on [Dispatchers.IO].
+ * Reads a PDF into structured blocks (headings, lists, paragraphs).
  *
+ * PDFBox reports every line with its glyph positions and fonts; those are
+ * handed to [PdfLayoutAnalyzer], which works out the structure.
  * Requires `PDFBoxResourceLoader.init(context)` once at startup (see HinglishApp).
  */
 class PdfTextExtractor(private val context: Context) {
 
-    /** The file name the user sees in the picker, e.g. "report.pdf". */
-    fun displayName(uri: Uri): String? =
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
-
-    fun extractPages(uri: Uri): Flow<PageText> = flow {
-        val input = context.contentResolver.openInputStream(uri)
-            ?: throw IOException("Could not open the selected file.")
-
-        // Buffer the parsed document in a temp file instead of the Java heap,
-        // so large PDFs do not compete with the LLM for memory.
-        val memory = MemoryUsageSetting.setupTempFileOnly().setTempDir(context.cacheDir)
-
-        val document = try {
-            input.use { PDDocument.load(it, memory) }
-        } catch (e: InvalidPasswordException) {
-            throw PdfPasswordProtectedException()
-        }
-
-        document.use { doc ->
-            val pageCount = doc.numberOfPages
-            val stripper = PDFTextStripper().apply {
-                // Reading order for multi-column layouts and positioned text.
-                sortByPosition = true
-                // Mark paragraph ends with a blank line so the chunker can see them.
-                paragraphEnd = "\n\n"
+    suspend fun readBlocks(file: File, onPage: (page: Int, pageCount: Int) -> Unit): List<DocBlock> =
+        withContext(Dispatchers.IO) {
+            // Buffer the parsed document in a temp file instead of the Java heap,
+            // so large PDFs do not compete with the LLM for memory.
+            val memory = MemoryUsageSetting.setupTempFileOnly().setTempDir(context.cacheDir)
+            val document = try {
+                PDDocument.load(file, memory)
+            } catch (e: InvalidPasswordException) {
+                throw PdfPasswordProtectedException()
             }
 
-            for (page in 1..pageCount) {
-                currentCoroutineContext().ensureActive()
-                stripper.startPage = page
-                stripper.endPage = page
-                emit(PageText(page, pageCount, stripper.getText(doc)))
+            document.use { doc ->
+                val collector = LineCollector()
+                val pageCount = doc.numberOfPages
+                for (page in 1..pageCount) {
+                    currentCoroutineContext().ensureActive()
+                    collector.startPage = page
+                    collector.endPage = page
+                    collector.writeText(doc, NullWriter)
+                    onPage(page, pageCount)
+                }
+                PdfLayoutAnalyzer.analyze(collector.lines)
             }
         }
-    }.flowOn(Dispatchers.IO)
+
+    /** Captures each output line of [PDFTextStripper] together with its layout. */
+    private class LineCollector : PDFTextStripper() {
+        val lines = mutableListOf<PdfLine>()
+
+        private val text = StringBuilder()
+        private val positions = mutableListOf<TextPosition>()
+        private var pageNumber = 0
+        private var pageHeight = 0f
+
+        init {
+            sortByPosition = true // reading order for multi-column and positioned text
+        }
+
+        override fun startPage(page: PDPage) {
+            super.startPage(page)
+            pageNumber++
+            pageHeight = page.mediaBox.height
+        }
+
+        override fun writeString(text: String, textPositions: MutableList<TextPosition>) {
+            this.text.append(text)
+            positions += textPositions
+        }
+
+        override fun writeWordSeparator() {
+            text.append(' ')
+        }
+
+        override fun writeLineSeparator() = flushLine()
+
+        override fun endPage(page: PDPage) {
+            flushLine()
+            super.endPage(page)
+        }
+
+        private fun flushLine() {
+            val content = text.toString().trim()
+            if (content.isNotEmpty() && positions.isNotEmpty()) {
+                val glyphs = positions.filter { !it.unicode.isNullOrBlank() }.ifEmpty { positions }
+                lines += PdfLine(
+                    text = content,
+                    page = pageNumber,
+                    x = glyphs.minOf { it.xDirAdj },
+                    y = glyphs.maxOf { it.yDirAdj },
+                    fontSize = glyphs.map { if (it.fontSizeInPt > 0f) it.fontSizeInPt else it.heightDir }
+                        .sorted()[glyphs.size / 2],
+                    bold = glyphs.count(::isBold) * 2 > glyphs.size,
+                    pageHeight = pageHeight,
+                )
+            }
+            text.clear()
+            positions.clear()
+        }
+
+        private fun isBold(p: TextPosition): Boolean {
+            val font = p.font ?: return false
+            val name = font.name.orEmpty().lowercase()
+            if ("bold" in name || "black" in name || "heavy" in name || "semibold" in name) return true
+            val descriptor = font.fontDescriptor ?: return false
+            return descriptor.isForceBold || descriptor.fontWeight >= 600f
+        }
+    }
+
+    private object NullWriter : Writer() {
+        override fun write(cbuf: CharArray, off: Int, len: Int) = Unit
+        override fun flush() = Unit
+        override fun close() = Unit
+    }
 }

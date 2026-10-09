@@ -1,12 +1,14 @@
 # Hinglish PDF Translator (Android)
 
-A 100% offline Android app: pick a PDF, and an on-device LLM translates it
-into conversational Hinglish (Hindi written in the Latin alphabet), streaming
-the output into the UI as it is generated.
+A 100% offline Android app: pick a PDF or EPUB, and an on-device LLM
+translates it into conversational Hinglish (Hindi written in the Latin
+alphabet). The headings, bullet points, numbering and paragraph breaks of
+the original are kept, on screen and in the saved file.
 
 - **Kotlin + Jetpack Compose (Material 3)**
-- **PDF text extraction:** `com.tom-roush:pdfbox-android`
-- **On-device inference:** `com.google.mediapipe:tasks-genai` (MediaPipe LLM Inference API)
+- **PDF:** `com.tom-roush:pdfbox-android`, with layout analysis to recover structure
+- **EPUB:** `java.util.zip` + `org.jsoup:jsoup`; the output is the same EPUB with translated text
+- **On-device inference:** LiteRT-LM (`.litertlm`, e.g. Llama 3.2 3B) and MediaPipe (`.task`)
 - **Concurrency:** Coroutines and Flow, end to end
 - **No network:** the manifest strips `INTERNET`, so nothing can leave the device
 
@@ -29,96 +31,114 @@ Or open the folder in Android Studio.
 
 ## Getting a model onto the phone
 
-MediaPipe needs a converted model file (`.task`, or `.bin` for older
-conversions). Good choices, smallest first:
+**Recommended: Llama 3.2 3B Instruct** (`.litertlm`, ~2.1 GB, 4096-token
+context). Hindi is one of Llama 3.2's officially supported languages, so it
+handles Roman Hindi much better than models of the same size. Qwen 2.5 3B
+was considered, but Hindi is not among its main languages and there is no
+ready-made phone build of it.
 
-| Model | Size | Notes |
-|---|---|---|
-| Gemma 3 1B IT (int4) `.task` | ~0.5 GB | Fast on most phones; decent Hinglish |
-| Gemma 2B IT (int4/int8) `.bin`/`.task` | 1.3–2.6 GB | Better fluency |
-| Llama 3.2 3B Instruct (q8) `.task` | ~3 GB | Best quality; needs 8 GB+ RAM |
+| Model | File | Size | Runtime |
+|---|---|---|---|
+| **Llama 3.2 3B Instruct** (recommended) | `model.litertlm` | ~2.1 GB | LiteRT-LM |
+| Gemma 3 1B IT (int4) | `.task` | ~0.5 GB | MediaPipe |
+| Qwen 2.5 1.5B Instruct | `..._ekv4096.task` | ~1.6 GB | MediaPipe |
 
-Download one from the LiteRT community on Hugging Face (accept the model's
-licence first), then use **any one** of these:
+Llama 3.2 3B needs a phone with 6 GB of RAM or more.
 
-1. **Import in the app** (easiest): tap **Import model** and pick the file.
-   It is copied into the app's private storage.
-2. **adb push** to app-specific storage (no permissions needed), then tap **Rescan**:
-   ```bash
-   adb shell mkdir -p /sdcard/Android/data/com.example.hinglishpdf/files/models
-   adb push gemma3-1b-it-int4.task /sdcard/Android/data/com.example.hinglishpdf/files/models/
-   ```
-3. **Bundle it** in `app/src/main/assets/`. It is copied to internal storage on
-   first launch. Only practical for small models; APKs over ~2 GB need
-   Play Asset Delivery instead.
+1. In the app, tap **Download Llama**. It opens the download in your browser
+   (a community LiteRT-LM conversion of Meta's model, published under the
+   Llama 3.2 Community License). The app itself never goes online.
+2. Tap **Import model** and pick the downloaded `model.litertlm`. It is copied
+   into the app's private storage, so you can delete the download afterwards.
 
-**Match `maxTokens` to your model.** `LlmConfig.maxTokens` (default 2048, in
-`LlmTranslator.kt`) must not exceed the KV cache the model was exported with.
-A file named `..._ekv1280.task` supports 1280 tokens, so set `maxTokens = 1280`
-and lower the chunk size to about 250 words.
+Alternatives: `adb push` a model to
+`/sdcard/Android/data/com.example.hinglishpdf/files/models/` and tap
+**Rescan**, or bundle a small one in `app/src/main/assets/`.
+
+The token budget is read from the file name when it says (`..._ekv1280.task`
+means 1280); otherwise 4096 for `.litertlm` and 2048 for `.task`. The amount
+of text per prompt is sized from it automatically.
 
 ## How it works
 
 ```
-Select PDF (SAF)
+Select PDF / EPUB (SAF)
    │
    ▼
-PdfTextExtractor ── Flow<PageText> ──► "Extracting text: page 3 of 12"
-   │  (PDFBox, Dispatchers.IO, page by page)
+DocumentLoader ── copies the file, detects the format
+   │   PDF:  PdfTextExtractor (lines + fonts + positions) → PdfLayoutAnalyzer
+   │   EPUB: EpubBook.read (spine order, XHTML elements)
    ▼
-TextChunker.chunk(text, maxWords = 400)
-   │  paragraphs → sentences → word windows, never above the limit
+List<DocBlock>   HEADING(level) · BULLET(depth) · NUMBERED(marker) · PARAGRAPH · QUOTE · CODE
+   │
    ▼
-for each chunk:  LlmTranslator.translate(chunk) ── Flow<String> (tokens)
-   │  fresh LlmInferenceSession per chunk, prompt = INSTRUCTION + chunk
+BlockChunker ── packs whole blocks into prompt-sized chunks
+   │
    ▼
-TranslationRepository ── Flow<TranslationEvent> ──► TranslatorViewModel
-                                                      │ StateFlow<TranslatorUiState>
-                                                      ▼
-                                              TranslatorScreen (Compose)
+for each chunk: HinglishPrompt.build →  [1] ## Heading
+   │                                    [2] - bullet
+   │                                    [3] 2. numbered step
+   │   LlmTranslator.generate ── Flow<String> (streamed to the screen)
+   │   HinglishPrompt.parse   ── answers matched back by [ID]; skipped or
+   │                             Devanagari lines are retried one by one
+   ▼
+TranslatorViewModel ── StateFlow ──► TranslatorScreen (renders the structure)
+   │
+   ▼
+Save: EPUB → same EPUB, text replaced in place (EpubBook.writeTranslated)
+      PDF  → new PDF with the same headings/lists/paragraphs (PdfExporter)
+Copy: plain text with •, ◦, 1., indentation and blank lines (DocumentFormatter)
 ```
+
+### The prompt
+
+Every chunk is sent with these guidelines (see
+[`HinglishPrompt.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/HinglishPrompt.kt)):
+
+- **Vocabulary:** keep technical terms, proper nouns and industry jargon in
+  English; translate everyday verbs, connectors and descriptive words into
+  Roman Hindi (kaam, lekin, zaroori, samajh).
+- **Script:** 100% Latin letters, no Devanagari.
+- **Flow:** natural conversation between modern bilingual speakers.
+- **Formatting:** keep headings, bullet points, numbering and paragraph breaks.
+
+The structure is not left to the model: each block goes in as one tagged
+line and the app re-applies the original markers to whatever comes back, so
+a bullet stays a bullet even if the model drops the `-`.
+
+### Main files
 
 | File | Role |
 |---|---|
-| [`HinglishApp.kt`](app/src/main/java/com/example/hinglishpdf/HinglishApp.kt) | Initialises PDFBox, holds app-wide singletons |
-| [`MainActivity.kt`](app/src/main/java/com/example/hinglishpdf/MainActivity.kt) | Hosts the Compose UI |
-| [`data/pdf/PdfTextExtractor.kt`](app/src/main/java/com/example/hinglishpdf/data/pdf/PdfTextExtractor.kt) | SAF URI → per-page text, on IO, disk-backed for large PDFs |
-| [`data/text/TextChunker.kt`](app/src/main/java/com/example/hinglishpdf/data/text/TextChunker.kt) | Word-limited chunking (unit-tested) |
-| [`data/llm/HinglishPrompt.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/HinglishPrompt.kt) | The exact instruction prepended to every chunk |
-| [`data/llm/ModelFileManager.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/ModelFileManager.kt) | Finds, imports or unbundles the model file |
-| [`data/llm/LlmTranslator.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/LlmTranslator.kt) | MediaPipe engine: GPU→CPU fallback, streaming, cancellation |
-| [`data/TranslationRepository.kt`](app/src/main/java/com/example/hinglishpdf/data/TranslationRepository.kt) | The extract → chunk → translate pipeline as one Flow |
-| [`ui/TranslatorViewModel.kt`](app/src/main/java/com/example/hinglishpdf/ui/TranslatorViewModel.kt) | UI state, model lifecycle, job control |
-| [`ui/TranslatorScreen.kt`](app/src/main/java/com/example/hinglishpdf/ui/TranslatorScreen.kt) | Material 3 screen: pickers, progress, output, copy |
-
-### Design notes
-
-- **Each chunk gets its own session.** Earlier chunks never fill the context
-  window, and memory stays flat no matter how long the PDF is.
-- **Context guard.** Before generating, the prompt is measured with
-  `sizeInTokens`; if it would leave less than ~55% of `maxTokens` for the
-  answer, you get a clear error instead of a native crash or a truncated
-  translation.
-- **Streaming without O(n²) work.** The output is kept as one string per
-  chunk and rendered in a `LazyColumn`, so each new token rebuilds only the
-  current chunk, not the whole document.
-- **Safe cancellation.** Cancel calls `cancelGenerateResponseAsync()` and waits
-  for the native side to stop before closing the session.
-- **Permissions:** none. Files are opened through the Storage Access Framework,
-  and `INTERNET` is removed with `tools:node="remove"`. Optional
-  `<uses-native-library>` entries let MediaPipe use the GPU via OpenCL.
+| [`data/document/DocumentLoader.kt`](app/src/main/java/com/example/hinglishpdf/data/document/DocumentLoader.kt) | Picked file → `SourceDocument` (PDF or EPUB) |
+| [`data/pdf/PdfTextExtractor.kt`](app/src/main/java/com/example/hinglishpdf/data/pdf/PdfTextExtractor.kt) | PDFBox lines with font size, weight and position |
+| [`data/pdf/PdfLayoutAnalyzer.kt`](app/src/main/java/com/example/hinglishpdf/data/pdf/PdfLayoutAnalyzer.kt) | Headings, nested lists, paragraphs; drops page numbers and running headers |
+| [`data/epub/EpubBook.kt`](app/src/main/java/com/example/hinglishpdf/data/epub/EpubBook.kt) | EPUB reading and in-place translated copy |
+| [`data/translate/BlockChunker.kt`](app/src/main/java/com/example/hinglishpdf/data/translate/BlockChunker.kt) | Prompt-sized chunks that never split a block's structure |
+| [`data/llm/HinglishPrompt.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/HinglishPrompt.kt) | Guidelines, tagged lines, answer parsing |
+| [`data/llm/LlmTranslator.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/LlmTranslator.kt) | Picks LiteRT-LM or MediaPipe from the model file |
+| [`data/llm/LiteRtLmEngine.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/LiteRtLmEngine.kt) / [`MediaPipeEngine.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/MediaPipeEngine.kt) | The two runtimes, GPU first with CPU fallback |
+| [`data/TranslationRepository.kt`](app/src/main/java/com/example/hinglishpdf/data/TranslationRepository.kt) | The whole pipeline as one Flow of events |
+| [`data/document/PdfExporter.kt`](app/src/main/java/com/example/hinglishpdf/data/document/PdfExporter.kt) | Writes the translated PDF |
+| [`ui/TranslatorViewModel.kt`](app/src/main/java/com/example/hinglishpdf/ui/TranslatorViewModel.kt) / [`TranslatorScreen.kt`](app/src/main/java/com/example/hinglishpdf/ui/TranslatorScreen.kt) | State and Material 3 UI |
 
 ## Limitations
 
+- **PDF structure is inferred.** PDFs store positioned text, not headings or
+  lists, so structure is recovered from font sizes, bold text, bullet glyphs,
+  numbering and indentation. It works well on documents exported from Word,
+  Google Docs or LibreOffice; unusual layouts (multi-column magazines, tables)
+  come out as plain paragraphs. A saved PDF is rebuilt from that structure,
+  not a pixel copy of the original pages.
+- **EPUB output is a true copy** (same chapters, styles, images, table of
+  contents, lists), but bold or links *inside* a sentence are flattened,
+  because the model rewrites the whole sentence. A block that is entirely bold
+  or a link keeps its formatting.
 - **Scanned PDFs** contain images, not text; the app reports "No text found".
   Run OCR on them first.
-- **Speed** depends on the phone: a 1B model on a recent phone writes roughly
-  10–30 tokens/s, so a 20-page document takes several minutes. The screen stays
-  awake while translating; keep the app in the foreground.
-- **Small models are imperfect:** sometimes one slips into Devanagari or adds a
-  preamble ("Here is the translation:"). Larger models follow the instruction
-  more reliably.
-- **API status:** Google has marked the MediaPipe LLM Inference API as
-  deprecated in favour of LiteRT-LM. It still works (this project pins 0.10.35),
-  and all of the MediaPipe code is in `LlmTranslator.kt`, so moving to LiteRT-LM
-  means rewriting that one class.
+- **Speed** depends on the phone: Llama 3.2 3B writes roughly 5–20 tokens/s
+  on recent phones, so a 20-page document can take 15–30 minutes. The screen
+  stays awake while translating; keep the app in the foreground.
+- **Small models are imperfect.** Lines that come back in Devanagari or go
+  missing are retried one at a time; if a retry also fails, the original text
+  is kept for that line rather than losing it.

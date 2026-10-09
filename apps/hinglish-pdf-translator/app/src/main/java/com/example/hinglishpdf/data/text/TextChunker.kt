@@ -51,7 +51,7 @@ object TextChunker {
         }
 
         for (paragraph in paragraphs(text)) {
-            splitToFit(paragraph, maxWords).forEachIndexed { index, piece ->
+            split(paragraph, maxWords).forEachIndexed { index, piece ->
                 val words = countWords(piece)
                 if (currentWords + words > maxWords) flush()
                 if (current.isNotEmpty()) {
@@ -81,8 +81,8 @@ object TextChunker {
             .filter { it.isNotEmpty() }
 
     /** Breaks one paragraph into pieces of at most [maxWords] words each. */
-    private fun splitToFit(paragraph: String, maxWords: Int): List<String> {
-        if (countWords(paragraph) <= maxWords) return listOf(paragraph)
+    fun split(paragraph: String, maxWords: Int): List<String> {
+        if (countWords(paragraph) <= maxWords) return listOf(paragraph.trim())
 
         val pieces = mutableListOf<String>()
         val current = StringBuilder()
