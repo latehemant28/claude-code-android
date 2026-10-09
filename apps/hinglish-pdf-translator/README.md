@@ -17,8 +17,13 @@ Requirements: JDK 17+, Android SDK 35.
 ```bash
 cd apps/hinglish-pdf-translator
 ./gradlew testDebugUnitTest assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
+
+The build makes one APK per ABI: `arm64-v8a` for phones, `x86_64` for the
+emulator. MediaPipe's native engine is about 27 MB per ABI, so a single APK
+for both would be twice the size. `assembleRelease` (R8-shrunk, about 14 MB)
+produces unsigned APKs; sign them with your own key before installing.
 
 Or open the folder in Android Studio.
 

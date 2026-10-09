@@ -15,10 +15,16 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // MediaPipe's LLM runtime ships native code; real devices are arm64.
-        // x86_64 is kept so the app still installs on an emulator.
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+    }
+
+    // MediaPipe's LLM engine is a ~27 MB native library per ABI, so build one
+    // APK per ABI: arm64-v8a for real phones, x86_64 for the emulator.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
         }
     }
 
@@ -53,8 +59,16 @@ android {
     }
 
     packaging {
+        // Compress the native libraries in the APK (roughly halves the download);
+        // Android extracts them once at install time.
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // Post-quantum crypto tables pulled in via PDFBox's BouncyCastle
+            // dependency; PDF decryption never uses them.
+            excludes += "org/bouncycastle/pqc/**"
         }
     }
 }
