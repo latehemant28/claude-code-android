@@ -58,9 +58,35 @@ enum class Language(
     val compactScript: Boolean
         get() = this == JAPANESE || this == KOREAN || this == CHINESE_SIMPLIFIED
 
-    /** What the prompt says for {sourceLanguage} / {targetLanguage}. */
+    /** What the prompt says for {Target_Language}. */
     val promptName: String
-        get() = if (this == AUTO_DETECT) "its original language (detect it automatically)" else englishName
+        get() = englishName
+
+    /** What the prompt says for {Source_Language}: "translating English books", or any language for Auto-Detect. */
+    val sourcePromptName: String
+        get() = if (this == AUTO_DETECT) "foreign-language" else englishName
+
+    /** What the prompt says for {Target_Script}: the writing system the translation must use. */
+    val script: String
+        get() = when (this) {
+            HINDI, MARATHI, NEPALI -> "Devanagari"
+            RUSSIAN -> "Cyrillic"
+            ARABIC -> "Arabic"
+            URDU -> "Urdu (Perso-Arabic Nastaliq)"
+            BENGALI -> "Bengali"
+            GUJARATI -> "Gujarati"
+            PUNJABI -> "Gurmukhi"
+            TAMIL -> "Tamil"
+            TELUGU -> "Telugu"
+            KANNADA -> "Kannada"
+            MALAYALAM -> "Malayalam"
+            JAPANESE -> "Japanese (kanji and kana)"
+            KOREAN -> "Hangul"
+            CHINESE_SIMPLIFIED -> "Simplified Chinese"
+            THAI -> "Thai"
+            VIETNAMESE -> "Vietnamese Latin (with diacritics)"
+            else -> "Latin"
+        }
 
     companion object {
         private val LATIN_SCRIPT = setOf(

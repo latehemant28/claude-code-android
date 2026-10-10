@@ -292,28 +292,37 @@ in its own languages even if the dropdowns change.
 
 [`TranslationPrompt.TEMPLATE`](app/src/main/java/com/example/hinglishpdf/data/llm/TranslationPrompt.kt)
 is the specified prompt, word for word (a unit test compares it with the
-specified text, trailing spaces included):
+specified text, trailing space included):
 
 ```
-You are a master literary and context-aware translator.
-Translate the following text from {sourceLanguage} to {targetLanguage}.
+You are an expert, context-aware translator translating {Source_Language} books into natural, conversational {Target_Language} using the {Target_Script} script.
 
-CRITICAL TONE & STYLE RULES:
-1. CONTEXT FIRST, TRANSLATE SECOND: ...
-2. MODERN & CONVERSATIONAL: ...
-3. NATURAL FLOW: ...
-4. EMOTION SENSE-FOR-SENSE: ...
-
-FORMATTING RULES:
-1. STRICT RETENTION: ...
-2. DO NOT TRANSLATE TAGS: ...
-3. COMPLETENESS: ...
+<rules>
+1. Script & Tone: Use the {Target_Script} script. ...
+2. Context-Awareness (Crucial): ... adapt the pronouns, honorifics, and formality style ...
+3. Vocabulary: ... You can leave highly technical or specific global terms in the English script ...
+4. Formatting & Labels: ... keep 'YOUTH:', 'PHILOSOPHER:', 'Chapter 1' exactly as they are in the original text.
+5. Output: Output ONLY the translated text. ...
+</rules>
 ```
 
 `TranslationRepository.translatePage(blocks, source, target)` fills in the
-book's languages (`TranslationPrompt.system`; Auto-Detect becomes "its
-original language (detect it automatically)") and every provider receives
-the result as its **system prompt**; each request carries only the chunk of
+book's languages (`TranslationPrompt.system`):
+
+- **{Source_Language}**: the From language ("translating English books");
+  Auto-Detect becomes "foreign-language".
+- **{Target_Language}**: the To language.
+- **{Target_Script}**: the To language's writing system (`Language.script`):
+  Devanagari (Hindi, Marathi, Nepali), Gurmukhi (Punjabi), Urdu
+  (Perso-Arabic Nastaliq), Arabic, Bengali, Gujarati, Tamil, Telugu, Kannada,
+  Malayalam, Thai, Cyrillic (Russian), Hangul (Korean), Japanese (kanji and
+  kana), Simplified Chinese, Vietnamese Latin, and Latin for the other
+  European languages and Indonesian.
+
+The app's output contract follows the prompt (translate 100% of the text;
+answer with the same blocks, in the same order), so every translated
+paragraph maps back to its place. Every provider receives the result as its
+**system prompt**; each request carries only the chunk of
 text. Temperature is 0.2 (unless a model refuses one), and Gemini's safety
 filters are set to `BLOCK_NONE` so ordinary literature isn't refused mid-book.
 

@@ -117,7 +117,7 @@ class TranslationRepositoryTest {
         val gemini = FakeGemini()
         repository(gemini).translatePage(page, Language.ENGLISH, Language.FRENCH).toList()
         val system = gemini.systemPrompts.single()
-        assertTrue(system.contains("Translate the following text from English to French."))
+        assertTrue(system.contains("translating English books into natural, conversational French using the Latin script."))
         assertEquals(TranslationPrompt.system(Language.ENGLISH, Language.FRENCH), system)
     }
 
@@ -302,7 +302,7 @@ class TranslationRepositoryTest {
         val gemini = FakeGemini()
         repository(gemini).translatePage(story).toList()
         val system = gemini.systemPrompts.single()
-        assertTrue(system.startsWith(TranslationPrompt.TEMPLATE.substringBefore("{sourceLanguage}")))
+        assertTrue(system.startsWith(TranslationPrompt.TEMPLATE.substringBefore("{Source_Language}")))
         assertTrue(system.contains("Never stop early and never leave a sentence in the original language."))
         assertTrue(system.contains("Never merge two blocks or split one"))
     }

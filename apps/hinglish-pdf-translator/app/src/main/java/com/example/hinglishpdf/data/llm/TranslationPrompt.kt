@@ -15,30 +15,28 @@ import com.example.hinglishpdf.data.translate.TranslationUnit
 object TranslationPrompt {
 
     /**
-     * Embedded exactly as specified, line for line (including the trailing
-     * spaces after "translator." and "archaic Spanish)."), with the
-     * {sourceLanguage} and {targetLanguage} placeholders.
+     * The translation prompt, embedded exactly as specified (including the
+     * trailing space after "script."), with the {Source_Language},
+     * {Target_Language} and {Target_Script} placeholders.
      */
     val TEMPLATE: String = listOf(
-        "You are a master literary and context-aware translator. ",
-        "Translate the following text from {sourceLanguage} to {targetLanguage}.",
+        "You are an expert, context-aware translator translating {Source_Language} books into natural, " +
+            "conversational {Target_Language} using the {Target_Script} script. ",
         "",
-        "CRITICAL TONE & STYLE RULES:",
-        "1. CONTEXT FIRST, TRANSLATE SECOND: Before translating, internally analyze the entire paragraph to grasp " +
-            "the underlying meaning, philosophy, and context. Ensure the core essence of the message is preserved.",
-        "2. MODERN & CONVERSATIONAL: Do NOT use rigid, archaic, or overly formal textbook vocabulary " +
-            "(e.g., avoid pure formal Sanskritized Hindi; avoid archaic Spanish). ",
-        "3. NATURAL FLOW: Translate the text using contemporary, everyday language—exactly how educated native " +
-            "speakers of {targetLanguage} converse in modern times.",
-        "4. EMOTION SENSE-FOR-SENSE: Translate sense-for-sense, not word-for-word. Adapt idioms and humor so they " +
-            "make sense in {targetLanguage} without losing the original meaning.",
-        "",
-        "FORMATTING RULES:",
-        "1. STRICT RETENTION: Maintain all original line breaks, bullet points, paragraphs, and markdown.",
-        "2. DO NOT TRANSLATE TAGS: Never translate character names, speaker labels, or structural tags. " +
-            "Leave them in their original script.",
-        "3. COMPLETENESS: Do not skip or summarize any part of the text. Return only the translated text, " +
-            "with zero conversational filler from your side.",
+        "<rules>",
+        "1. Script & Tone: Use the {Target_Script} script. Keep it natural, modern, and easy to read, exactly like " +
+            "how modern native speakers communicate in daily life.",
+        "2. Context-Awareness (Crucial): Analyze the genre and tone of the text. Automatically adapt the pronouns, " +
+            "honorifics, and formality style based on the context (e.g., use formal/respectful phrasing for " +
+            "philosophical dialogues, and friendly/casual phrasing for modern fiction).",
+        "3. Vocabulary: Do NOT use highly archaic, purely academic, or strictly literal translations. Use commonly " +
+            "accepted loan words where appropriate for modern readers. You can leave highly technical or specific " +
+            "global terms in the English script if they lack a natural equivalent.",
+        "4. Formatting & Labels: Maintain exact formatting, paragraphs, and bullet points. Do NOT translate speaker " +
+            "labels, character names, or structural tags (e.g., keep 'YOUTH:', 'PHILOSOPHER:', 'Chapter 1' exactly " +
+            "as they are in the original text).",
+        "5. Output: Output ONLY the translated text. Never add conversational filler, introductions, or explanations.",
+        "</rules>",
     ).joinToString("\n")
 
     /**
@@ -47,7 +45,7 @@ object TranslationPrompt {
      */
     val OUTPUT_CONTRACT: String = listOf(
         "OUTPUT CONTRACT:",
-        "1. 100% TRANSLATION: Translate every heading, sentence, list item and quotation into {targetLanguage}, " +
+        "1. 100% TRANSLATION: Translate every heading, sentence, list item and quotation into {Target_Language}, " +
             "from the first word to the last. Never stop early and never leave a sentence in the original language.",
         "2. SAME BLOCKS: The text is split into blocks separated by blank lines. Answer with exactly the same " +
             "blocks, in the same order, separated by blank lines. Never merge two blocks or split one; keep each " +
@@ -59,13 +57,14 @@ object TranslationPrompt {
     /** Added for a second try when an answer was missing, cut short or partly untranslated. */
     val STRICT_REMINDER: String =
         "IMPORTANT: An earlier answer for this text was incomplete or left parts in the original language. " +
-            "This time translate ALL of it into {targetLanguage}, every sentence, and answer with the same blocks."
+            "This time translate ALL of it into {Target_Language}, every sentence, and answer with the same blocks."
 
     /** The system prompt for a book translated from [source] (possibly Auto-Detect) into [target]. */
     fun system(source: Language, target: Language, strict: Boolean = false): String =
         listOfNotNull(TEMPLATE, OUTPUT_CONTRACT, STRICT_REMINDER.takeIf { strict }).joinToString("\n\n")
-            .replace("{sourceLanguage}", source.promptName)
-            .replace("{targetLanguage}", target.promptName)
+            .replace("{Source_Language}", source.sourcePromptName)
+            .replace("{Target_Language}", target.promptName)
+            .replace("{Target_Script}", target.script)
 
     /** The user message for one chunk: the chunk itself (the instructions are in [system]). */
     fun build(units: List<TranslationUnit>): String = chunkText(units)

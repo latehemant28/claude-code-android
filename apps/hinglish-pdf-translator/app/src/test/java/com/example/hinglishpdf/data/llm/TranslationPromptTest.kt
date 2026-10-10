@@ -19,21 +19,17 @@ class TranslationPromptTest {
         unit(BlockKind.NUMBERED, "Save the file", marker = "3."),
     )
 
-    /** The prompt exactly as specified (copied from the request, trailing spaces included). */
+    /** The prompt exactly as specified (copied from the request, trailing space included). */
     private val specified =
-        "You are a master literary and context-aware translator. \n" +
-        "Translate the following text from {sourceLanguage} to {targetLanguage}.\n" +
+        "You are an expert, context-aware translator translating {Source_Language} books into natural, conversational {Target_Language} using the {Target_Script} script. \n" +
         "\n" +
-        "CRITICAL TONE & STYLE RULES:\n" +
-        "1. CONTEXT FIRST, TRANSLATE SECOND: Before translating, internally analyze the entire paragraph to grasp the underlying meaning, philosophy, and context. Ensure the core essence of the message is preserved.\n" +
-        "2. MODERN & CONVERSATIONAL: Do NOT use rigid, archaic, or overly formal textbook vocabulary (e.g., avoid pure formal Sanskritized Hindi; avoid archaic Spanish). \n" +
-        "3. NATURAL FLOW: Translate the text using contemporary, everyday language—exactly how educated native speakers of {targetLanguage} converse in modern times.\n" +
-        "4. EMOTION SENSE-FOR-SENSE: Translate sense-for-sense, not word-for-word. Adapt idioms and humor so they make sense in {targetLanguage} without losing the original meaning.\n" +
-        "\n" +
-        "FORMATTING RULES:\n" +
-        "1. STRICT RETENTION: Maintain all original line breaks, bullet points, paragraphs, and markdown.\n" +
-        "2. DO NOT TRANSLATE TAGS: Never translate character names, speaker labels, or structural tags. Leave them in their original script.\n" +
-        "3. COMPLETENESS: Do not skip or summarize any part of the text. Return only the translated text, with zero conversational filler from your side."
+        "<rules>\n" +
+        "1. Script & Tone: Use the {Target_Script} script. Keep it natural, modern, and easy to read, exactly like how modern native speakers communicate in daily life.\n" +
+        "2. Context-Awareness (Crucial): Analyze the genre and tone of the text. Automatically adapt the pronouns, honorifics, and formality style based on the context (e.g., use formal/respectful phrasing for philosophical dialogues, and friendly/casual phrasing for modern fiction).\n" +
+        "3. Vocabulary: Do NOT use highly archaic, purely academic, or strictly literal translations. Use commonly accepted loan words where appropriate for modern readers. You can leave highly technical or specific global terms in the English script if they lack a natural equivalent.\n" +
+        "4. Formatting & Labels: Maintain exact formatting, paragraphs, and bullet points. Do NOT translate speaker labels, character names, or structural tags (e.g., keep 'YOUTH:', 'PHILOSOPHER:', 'Chapter 1' exactly as they are in the original text).\n" +
+        "5. Output: Output ONLY the translated text. Never add conversational filler, introductions, or explanations.\n" +
+        "</rules>"
 
     @Test
     fun `the prompt template is embedded exactly`() {
@@ -41,19 +37,24 @@ class TranslationPromptTest {
     }
 
     @Test
-    fun `the languages are filled in`() {
+    fun `the languages and the script are filled in`() {
         val prompt = TranslationPrompt.system(Language.ENGLISH, Language.SPANISH)
+        val filled = specified.replace("{Source_Language}", "English").replace("{Target_Language}", "Spanish")
+            .replace("{Target_Script}", "Latin")
         // The specified prompt, word for word, then the output contract.
-        assertTrue(prompt.startsWith(specified.replace("{sourceLanguage}", "English").replace("{targetLanguage}", "Spanish") + "\n\nOUTPUT CONTRACT:"))
+        assertTrue(prompt.startsWith(filled + "\n\nOUTPUT CONTRACT:"))
+        assertTrue(prompt.contains("translating English books into natural, conversational Spanish using the Latin script."))
         assertTrue(prompt.contains("Translate every heading, sentence, list item and quotation into Spanish"))
         assertTrue(!prompt.contains("IMPORTANT: An earlier answer"))
         assertTrue(TranslationPrompt.system(Language.ENGLISH, Language.SPANISH, strict = true).endsWith("answer with the same blocks."))
-        assertTrue(prompt.contains("Translate the following text from English to Spanish."))
-        assertTrue(prompt.contains("educated native speakers of Spanish converse"))
         assertTrue(!prompt.contains("{"))
 
-        val auto = TranslationPrompt.system(Language.AUTO_DETECT, Language.HINDI)
-        assertTrue(auto.contains("Translate the following text from its original language (detect it automatically) to Hindi."))
+        val hindi = TranslationPrompt.system(Language.AUTO_DETECT, Language.HINDI)
+        assertTrue(hindi.contains("translating foreign-language books into natural, conversational Hindi using the Devanagari script."))
+        assertTrue(hindi.contains("1. Script & Tone: Use the Devanagari script."))
+        assertEquals("Gurmukhi", Language.PUNJABI.script)
+        assertEquals("Urdu (Perso-Arabic Nastaliq)", Language.URDU.script)
+        assertEquals("Hangul", Language.KOREAN.script)
     }
 
     @Test
