@@ -11,20 +11,23 @@ plugins {
 /**
  * Optional: bundle the model in the APK, so the app works with no import
  * step. `./gradlew assembleRelease -PembedModel` downloads Qwen 2.5 1.5B
- * (Apache-2.0, ~1.6 GB) into src/main/assets once, at BUILD time; the app
- * itself still never touches the network. The APK becomes ~1.65 GB.
+ * (Apache-2.0, ~1.6 GB) once, at BUILD time, into build/qwenModel/, and adds
+ * that folder to the APK's assets for this build only; the app itself still
+ * never touches the network. The APK becomes ~1.6 GB.
  */
 val embedModel = project.hasProperty("embedModel")
 val qwenModelUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/" +
     "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
-val qwenAsset = layout.projectDirectory.file("src/main/assets/Qwen2.5-1.5B-Instruct_q8_ekv1280.task")
+val qwenAssetsDir = layout.buildDirectory.dir("qwenModel/assets")
+val qwenAsset = qwenAssetsDir.map { it.file("Qwen2.5-1.5B-Instruct_q8_ekv1280.task") }
 
 val downloadQwenModel by tasks.registering {
     description = "Downloads the Qwen 2.5 1.5B model into the app's assets (build machine only)."
     outputs.file(qwenAsset)
     doLast {
-        val target = qwenAsset.asFile
+        val target = qwenAsset.get().asFile
         if (target.length() > 1_000_000_000L) return@doLast // already there
+        target.parentFile.mkdirs()
         val partial = File(target.path + ".part")
         URI(qwenModelUrl).toURL().openStream().use { input ->
             partial.outputStream().use { input.copyTo(it, bufferSize = 1 shl 20) }
@@ -91,6 +94,10 @@ android {
     // streamed out of the APK and copying it costs twice the memory.
     androidResources {
         noCompress += listOf("task", "bin", "tflite")
+    }
+
+    if (embedModel) {
+        sourceSets["main"].assets.srcDir(qwenAssetsDir)
     }
 
     packaging {

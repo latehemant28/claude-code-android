@@ -9,8 +9,8 @@ with **Qwen 2.5 1.5B Instruct** running on the phone's **GPU**.
   together, so page N of the output is page N of the original.
 - **Structure kept:** headings, bullet points (with nesting), numbering and
   paragraph breaks are detected on every page and restored after translation.
-- **GPU only:** the model runs on MediaPipe's OpenCL GPU engine at
-  temperature 0.2. There is no CPU path and no CPU fallback.
+- **GPU only:** the model runs on MediaPipe's GPU engine at temperature 0.2.
+  There is no CPU path and no CPU fallback.
 - **Background:** a foreground service with a persistent "Translating page 45
   of 300..." notification keeps running with the screen locked.
 - **Crash-proof:** every page is saved to Room the moment it is done; after a
@@ -46,8 +46,8 @@ the fastest accelerator available for Qwen today.
 `LlmInference.Backend.GPU` in
 [`MediaPipeEngine.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/MediaPipeEngine.kt),
 and the app has no CPU option. MediaPipe hands that setting straight to its
-native OpenCL LLM engine, which reports "OpenCL is not supported" rather than
-switching to the CPU. If a phone's GPU can't run the model, the app shows that
+native GPU LLM engine, which reports an error (e.g. "OpenCL is not
+supported") rather than switching to the CPU. If a phone's GPU can't run the model, the app shows that
 error and does not translate.
 
 The CPU still does the small jobs around the model that every app needs:
@@ -62,9 +62,11 @@ Pick **one**:
    browser, once only, and the app itself never goes online. Then tap
    **Import model** and pick the downloaded `.task` file. It is copied into the
    app's private storage, so you can delete the download afterwards.
-2. **Bundled in the APK** (app size up to ~1.7 GB):
+2. **Bundled in the APK** (app size ~1.6 GB):
    `./gradlew assembleRelease -PembedModel`. The *build machine* downloads the
-   model into `app/src/main/assets/` once and packs it into the arm64 APK. On
+   model once (into `app/build/qwenModel/`) and packs it into the arm64 APK
+   (tested: 1.61 GB, with the model stored uncompressed). Builds without the flag
+   leave it out. On
    first launch the app unpacks it to internal storage (MediaPipe needs a real
    file path), so the phone needs ~3.3 GB free that first time.
 3. **adb:** push the `.task` file to
@@ -79,7 +81,7 @@ Requirements: JDK 17+, Android SDK 35.
 cd apps/hinglish-pdf-translator
 ./gradlew testDebugUnitTest assembleDebug          # tests + debug APKs
 ./gradlew assembleRelease                          # R8-shrunk, ~16 MB per ABI
-./gradlew assembleRelease -PembedModel             # with Qwen inside (~1.65 GB)
+./gradlew assembleRelease -PembedModel             # with Qwen inside (~1.6 GB)
 adb install app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
 ```
 
@@ -204,10 +206,9 @@ permission on Android 10+ (this app's minimum).
   micro-chunking, page stitching, Room resume) and the EPUB/PDF structure
   checks pass. GPU loading, real Qwen output quality and the notification
   flow still need a device.
-- **GPU support varies by phone.** Recent Snapdragon, Dimensity and Exynos
-  phones with OpenCL should work. Phones without usable OpenCL (for example
-  Google Pixels, whose Tensor chips don't ship it) cannot run the app, because
-  there is deliberately no CPU fallback.
+- **GPU support varies by phone.** Google benchmarks this model on the GPU of
+  recent flagships (S25 Ultra). A phone whose GPU driver can't run it gets an
+  error and cannot translate, because there is deliberately no CPU fallback.
 - **PDF structure is inferred.** PDFs store positioned text, not headings or
   lists, so structure is recovered from font sizes, bold text, bullet glyphs,
   numbering and indentation. It works well on documents exported from Word,
