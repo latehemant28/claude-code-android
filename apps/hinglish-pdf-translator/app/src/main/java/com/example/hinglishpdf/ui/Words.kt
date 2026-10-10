@@ -78,6 +78,11 @@ object Say {
     val keyReady = Phrase("तैयार है", "Ready")
     val keyReadyHelp = Phrase("चाबी लगी हुई है। सब तैयार है।", "The key is set up. Everything is ready.")
     val change = Phrase("बदलें", "Change")
+    val aiKey = Phrase("AI चाबी", "AI key")
+    val tapToAddKey = Phrase("चाबी लगाने के लिए दबाएं", "Tap to add a key")
+    val connected = Phrase("जुड़ा हुआ", "Connected")
+    val translateTo = Phrase("किस भाषा में", "Translate to")
+    val chooseBookFile = Phrase("किताब चुनें (PDF/EPUB)", "Choose a book (PDF/EPUB)")
     val languageTitle = Phrase("भाषा", "Language")
     fun languageHelp(target: Language) = Phrase(
         "किताब किस भाषा में चाहिए? भाषा बदलने के लिए यहाँ दबाएं। अभी चुनी है: ${target.nativeName ?: target.englishName}",
@@ -93,6 +98,11 @@ object Say {
         "अपनी भाषा चुनें। जिस भाषा में किताब चाहिए, उसके नाम पर दबाएं।",
         "Choose your language. Press the name of the language you want the book in.",
     )
+    val chooseLanguageNote = Phrase(
+        "किताबें इसी भाषा में अनुवाद होंगी। आप इसे कभी भी बदल सकते हैं।",
+        "Books will be translated into this language. You can change it any time.",
+    )
+    val continueButton = Phrase("आगे बढ़ें", "Continue")
     val notNow = Phrase("अभी नहीं", "Not now")
 
     // Tour
@@ -107,7 +117,8 @@ object Say {
     val tourBookText = Phrase("फिर यह हरा बटन दबाकर अपनी किताब चुनें। बस इतना ही!", "Then tap this green button to pick a PDF or EPUB. That's it!")
     val tapToContinue = Phrase("👆 आगे बढ़ने के लिए कहीं भी दबाएं", "👆 Tap to continue")
     val tapToStart = Phrase("👆 शुरू करने के लिए दबाएं", "👆 Tap to start")
-    val skipTour = Phrase("छोड़ें", "Skip tour")
+    val skipTour = Phrase("छोड़ें", "Skip")
+    val gotIt = Phrase("ठीक है", "Got it")
 
     // Consent
     val consentTitle = Phrase("क्या किताब AI को भेजें?", "Send the book to AI?")
@@ -136,6 +147,12 @@ object Say {
         "There are no books yet. On the Translate page, press the green button to choose a book.",
     )
     val page = Phrase("पेज", "Page")
+    fun pageOf(page: Int, total: String) = Phrase("पेज $page / $total", "page $page of $total")
+    fun pagesDone(done: Int, total: String) = Phrase("$done / $total पेज", "$done / $total pages")
+    val noBooksNote = Phrase(
+        "जिन किताबों का अनुवाद होगा, वे यहाँ दिखेंगी: पढ़ने, सुनने या सेव करने के लिए।",
+        "Books you translate appear here, ready to read, listen to or save.",
+    )
 
     // Listening
     val previous = Phrase("पिछला", "Previous")

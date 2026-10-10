@@ -7,6 +7,12 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
@@ -61,7 +67,10 @@ class FirstLaunchTest {
         }
         compose.onNodeWithText(Say.chooseLanguage.hi).assertExists() // Hindi until a language is chosen
         save(ShadowDialog.getLatestDialog().window!!.decorView, "first-launch-language")
+        compose.onNode(hasScrollAction() and hasAnyDescendant(isSelectable())).performScrollToNode(hasText("Spanish"))
         compose.onNodeWithText("Spanish").performClick()
+        assertFalse(done) // saved only on Continue
+        compose.onNodeWithText(Say.continueButton.hi).performClick()
         assertTrue(done)
         assertEquals(Language.SPANISH, app.preferences.targetLanguage.value)
     }
@@ -80,7 +89,12 @@ class FirstLaunchTest {
             compose.onNodeWithText("${i + 1} / 3").assertExists()
             save(compose.activity.window.decorView, "tour-${i + 1}")
             assertFalse(done)
-            compose.onRoot().performTouchInput { click(center) }
+            when (step) {
+                // A tap anywhere moves on, as do Next and, on the last step, Got it.
+                TourStep.API_KEY -> compose.onRoot().performTouchInput { click(Offset(width * 0.1f, height * 0.05f)) }
+                TourStep.LANGUAGE -> compose.onNodeWithText(Say.next.hi).performClick()
+                TourStep.UPLOAD -> compose.onNodeWithText(Say.gotIt.hi).performClick()
+            }
             compose.waitForIdle()
         }
         assertTrue(done)

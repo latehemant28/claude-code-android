@@ -14,72 +14,64 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-// The brand palette: deep indigo and slate, with violet, pink and cyan accents.
-private val Indigo300 = Color(0xFFA5B4FC)
-private val Indigo400 = Color(0xFF818CF8)
-private val Indigo500 = Color(0xFF6366F1)
-private val Indigo600 = Color(0xFF4F46E5)
-private val Indigo900 = Color(0xFF1E1B4B)
-private val Violet500 = Color(0xFF8B5CF6)
-private val Violet300 = Color(0xFFC4B5FD)
+// The brand palette: deep indigo / purple, with violet, pink and cyan accents.
 private val Pink500 = Color(0xFFEC4899)
-private val Cyan400 = Color(0xFF22D3EE)
 private val Cyan700 = Color(0xFF0E7490)
 private val Emerald500 = Color(0xFF10B981)
 private val Amber500 = Color(0xFFF59E0B)
 
 private val LightColors = lightColorScheme(
-    primary = Indigo600,
+    primary = Color(0xFF5B45E0),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE0E7FF),
-    onPrimaryContainer = Indigo900,
-    secondary = Color(0xFF7C3AED),
+    primaryContainer = Color(0xFFE5DEFF),
+    onPrimaryContainer = Color(0xFF1C0F5C),
+    secondary = Color(0xFFB0307F),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFEDE9FE),
-    onSecondaryContainer = Color(0xFF2E1065),
+    secondaryContainer = Color(0xFFFFD7F3),
+    onSecondaryContainer = Color(0xFF3E0A2E),
     tertiary = Cyan700,
     tertiaryContainer = Color(0xFFCFFAFE),
     onTertiaryContainer = Color(0xFF083344),
-    background = Color(0xFFF3F4FA),
+    background = Color(0xFFF5F4FB),
     onBackground = Color(0xFF0F172A),
-    surface = Color(0xFFF3F4FA),
+    surface = Color(0xFFF5F4FB),
     onSurface = Color(0xFF0F172A),
-    surfaceVariant = Color(0xFFE2E5F1),
-    onSurfaceVariant = Color(0xFF475569),
+    surfaceVariant = Color(0xFFE5E1F3),
+    onSurfaceVariant = Color(0xFF4B5068),
     surfaceContainerLowest = Color.White,
     surfaceContainerLow = Color.White,
-    surfaceContainer = Color(0xFFF8F9FD),
-    surfaceContainerHigh = Color(0xFFECEEF7),
-    surfaceContainerHighest = Color(0xFFE2E5F1),
-    outline = Color(0xFF94A3B8),
-    outlineVariant = Color(0xFFD9DDEA),
+    surfaceContainer = Color(0xFFF9F8FD),
+    surfaceContainerHigh = Color(0xFFEEEBF8),
+    surfaceContainerHighest = Color(0xFFE5E1F3),
+    outline = Color(0xFF948FB0),
+    outlineVariant = Color(0xFFDCD8EC),
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Indigo300,
-    onPrimary = Color(0xFF14123A),
-    primaryContainer = Color(0xFF2E2A78),
-    onPrimaryContainer = Color(0xFFE0E7FF),
-    secondary = Violet300,
-    onSecondary = Color(0xFF2E1065),
-    secondaryContainer = Color(0xFF3B2470),
-    onSecondaryContainer = Color(0xFFEDE9FE),
-    tertiary = Cyan400,
+    primary = Color(0xFFB4A5FF),
+    onPrimary = Color(0xFF21105C),
+    primaryContainer = Color(0xFF2B2A5C),
+    onPrimaryContainer = Color(0xFFE5DEFF),
+    secondary = Color(0xFFF0A6E0),
+    onSecondary = Color(0xFF3E0A2E),
+    secondaryContainer = Color(0xFF4A2550),
+    onSecondaryContainer = Color(0xFFFFD7F3),
+    tertiary = Color(0xFF7DD3FC),
     tertiaryContainer = Color(0xFF164E63),
     onTertiaryContainer = Color(0xFFCFFAFE),
-    background = Color(0xFF0B0E1A),
-    onBackground = Color(0xFFE2E8F0),
-    surface = Color(0xFF0B0E1A),
-    onSurface = Color(0xFFE2E8F0),
+    background = Color(0xFF0D0F1C),
+    onBackground = Color(0xFFE6E8F2),
+    surface = Color(0xFF0D0F1C),
+    onSurface = Color(0xFFE6E8F2),
     surfaceVariant = Color(0xFF232842),
-    onSurfaceVariant = Color(0xFFA3AEC6),
-    surfaceContainerLowest = Color(0xFF080A14),
-    surfaceContainerLow = Color(0xFF131729),
-    surfaceContainer = Color(0xFF171C31),
-    surfaceContainerHigh = Color(0xFF1E2440),
-    surfaceContainerHighest = Color(0xFF262D4D),
-    outline = Color(0xFF5B6585),
-    outlineVariant = Color(0xFF2A3150),
+    onSurfaceVariant = Color(0xFFA3ACC6),
+    surfaceContainerLowest = Color(0xFF090B15),
+    surfaceContainerLow = Color(0xFF141729),
+    surfaceContainer = Color(0xFF171A2C),
+    surfaceContainerHigh = Color(0xFF1E2238),
+    surfaceContainerHighest = Color(0xFF272C46),
+    outline = Color(0xFF4A5170),
+    outlineVariant = Color(0xFF2A2F48),
 )
 
 /** Rounded everywhere: 12 dp chips, 20 dp cards, 28 dp sheets and dialogs. */
@@ -105,7 +97,7 @@ data class BrandColors(
 )
 
 private fun brand(dark: Boolean) = BrandColors(
-    accent = Brush.linearGradient(listOf(Indigo500, Violet500, Pink500)),
+    accent = Brush.linearGradient(listOf(Color(0xFF7C5CFF), Color(0xFFC04FD8), Pink500)),
     heroWash = if (dark) {
         Brush.linearGradient(listOf(Color(0xFF26236B), Color(0xFF3A1F66), Color(0xFF1A2342)))
     } else {
@@ -113,7 +105,7 @@ private fun brand(dark: Boolean) = BrandColors(
     },
     success = Emerald500,
     warning = Amber500,
-    accentStart = if (dark) Indigo400 else Indigo600,
+    accentStart = if (dark) Color(0xFFB4A5FF) else Color(0xFF5B45E0),
     accentEnd = Pink500,
 )
 

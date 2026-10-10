@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
-/** The sheet's content: Get API Key and the key field up front, the model folded under Advanced Settings. */
+/** The sheet's content: Get API Key and the key field up front, the model folded under Advanced. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi", application = android.app.Application::class)
@@ -48,7 +48,7 @@ class ProviderSettingsTest {
         }
         compose.onNodeWithText("Get API Key").assertIsDisplayed()
         compose.onNodeWithText("Model (optional)").assertDoesNotExist()
-        compose.onNodeWithText("Advanced Settings").performClick()
+        compose.onNodeWithText("Advanced").performClick()
         compose.onNodeWithText("Model (optional)").assertIsDisplayed()
         screenshot("provider-settings-content")
     }

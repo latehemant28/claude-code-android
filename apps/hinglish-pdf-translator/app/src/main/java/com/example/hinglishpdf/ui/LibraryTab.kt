@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +28,13 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -61,9 +69,11 @@ import com.example.hinglishpdf.data.document.bulletFor
 import com.example.hinglishpdf.ui.reader.LocalReaderStyle
 
 /**
- * The Library tab: every book as a card with its progress and quick actions
- * (Read, Pause / Resume; save, copy and delete in its menu); the selected book's translated
- * pages follow, with the page being written streaming in live.
+ * The My Books tab: every book as a card — progress ring and status on the
+ * left, title, pages and quick actions (Pause / Resume, Read, Listen) in the
+ * middle, and Save to Downloads, Copy text and Delete in its ⋮ menu. The
+ * selected book's translated pages follow, with the page being written
+ * streaming in live.
  */
 @Composable
 fun LibraryTab(
@@ -94,27 +104,20 @@ fun LibraryTab(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item(key = "summary") {
-            val done = state.books.count { it.book.status == BookStatus.COMPLETED }
-            Text(
-                "📚 ${state.books.size}   ✅ $done",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         items(state.books, key = { "book-${it.book.id}" }) { entry ->
             BookCard(
                 entry = entry,
                 selected = entry.book.id == state.selected?.book?.id,
                 running = state.isRunning(entry.book),
-                liveLabel = state.live.label.takeIf { state.isRunning(entry.book) },
+                liveLabel = state.live.label.takeIf { state.isRunning(entry.book) && it.isNotBlank() },
                 exportFormat = state.outputFormat,
                 opening = state.openingBookId == entry.book.id,
                 actions = actions,
                 onDelete = { deleting = entry.book.id },
+                modifier = Modifier.animateItem(),
             )
         }
 
@@ -145,33 +148,35 @@ fun LibraryTab(
 @Composable
 private fun EmptyLibrary(onTranslateBook: () -> Unit) {
     val guide = LocalGuide.current
+    LaunchedEffect(Unit) { guide.say(Say.noBooksHelp) }
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        GradientIcon(Icons.Filled.AutoStories, size = 96.dp)
-        Spacer(Modifier.height(20.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(Say.noBooks.text(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            SpeakButton({ guide.sayNow(Say.noBooksHelp) })
-        }
-        Spacer(Modifier.height(20.dp))
-        BigTile(
-            icon = Icons.Filled.UploadFile,
-            title = Say.chooseBook.text(),
-            subtitle = "PDF / EPUB",
-            background = GoGreen,
-            onClick = onTranslateBook,
-            onSpeak = { guide.sayNow(Say.chooseBookHelp) },
+        Icon(Icons.Filled.AutoStories, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(64.dp))
+        Spacer(Modifier.height(16.dp))
+        Text(Say.noBooks.text(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            Say.noBooksNote.text(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
         )
+        Spacer(Modifier.height(24.dp))
+        ExtendedFloatingActionButton(onClick = onTranslateBook, containerColor = GoColor, contentColor = Color.White) {
+            Icon(Icons.Filled.UploadFile, contentDescription = null)
+            Spacer(Modifier.width(12.dp))
+            Text(Say.chooseBook.text(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
 /**
- * One book: a ring that fills as it is translated, the title, and big
- * buttons — Listen, Read, Pause / Resume. Save to Downloads, copy and delete
- * are in the ⋮ menu.
+ * One book. Left: progress ring and status tag. Middle: title, pages and the
+ * quick actions. Top right: ⋮ with Save to Downloads, Copy text and Delete.
+ * Tapping the card shows its pages below the list.
  */
 @Composable
 private fun BookCard(
@@ -183,36 +188,63 @@ private fun BookCard(
     opening: Boolean,
     actions: BookActions,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val book = entry.book
     var menu by remember { mutableStateOf(false) }
-    SectionCard(
+    val statusColor = bookStatusColor(entry, running)
+    Card(
         onClick = { actions.onSelect(book.id) },
-        color = if (selected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer,
+        ),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ProgressRing(entry)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    book.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "${bookStatus(entry, running)} · ${entry.translatedPages}/${book.pageCount.takeIf { it > 0 } ?: "?"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "${book.format.name} · ${book.fromLanguage.englishName} → ${book.toLanguage.nativeName ?: book.toLanguage.englishName}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Box {
+            Row(
+                Modifier.padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ProgressRing(entry, color = statusColor)
+                    Surface(shape = MaterialTheme.shapes.extraSmall, color = statusColor.copy(alpha = 0.16f)) {
+                        Text(
+                            bookStatus(entry, running),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = statusColor,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f).padding(end = 32.dp)) {
+                    Text(
+                        book.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${Say.pagesDone(entry.translatedPages, pagesTotal(entry)).text()} · ${book.toLanguage.nativeName ?: book.toLanguage.englishName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (liveLabel != null || (book.status == BookStatus.FAILED && book.error != null)) {
+                        Text(
+                            liveLabel ?: "${book.error}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (liveLabel == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    BookIconButtons(entry, running, opening, actions)
+                }
             }
-            Box {
+            Box(Modifier.align(Alignment.TopEnd)) {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More actions") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (entry.translatedPages > 0) {
@@ -221,36 +253,27 @@ private fun BookCard(
                             leadingIcon = { Icon(Icons.Filled.FileDownload, contentDescription = null) },
                             onClick = { menu = false; actions.onExport(book) },
                         )
-                    }
-                    // Copies the pages shown below, so only for the selected book.
-                    if (selected && entry.translatedPages > 0) {
                         DropdownMenuItem(
                             text = { Text("Copy text") },
                             leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
-                            onClick = { menu = false; actions.onCopy() },
+                            onClick = { menu = false; actions.onCopy(book) },
                         )
                     }
                     DropdownMenuItem(
                         text = { Text("Delete", color = if (running) Color.Unspecified else MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = null,
+                                tint = if (running) LocalContentColor.current else MaterialTheme.colorScheme.error,
+                            )
+                        },
                         enabled = !running,
                         onClick = { menu = false; onDelete() },
                     )
                 }
             }
         }
-        if (book.status == BookStatus.FAILED || liveLabel != null) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                liveLabel ?: "${book.error}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (liveLabel == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        BookButtons(entry, running, opening, actions)
     }
 }
 

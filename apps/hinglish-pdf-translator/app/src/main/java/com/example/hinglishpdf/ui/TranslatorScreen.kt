@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.outlined.LibraryBooks
 import androidx.compose.material.icons.filled.Settings
@@ -45,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -59,9 +61,10 @@ import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.ui.reader.LocalReaderStyle
 import com.example.hinglishpdf.ui.reader.ReaderSettingsSheet
+import kotlinx.coroutines.launch
 
-/** The exact title of the main dashboard's top bar. */
-const val DASHBOARD_TITLE = "Bring your own key"
+/** The exact title of the main dashboard's hero. */
+const val DASHBOARD_TITLE = "Bring your own key (BYOK)"
 
 private class TabSpec(val tab: AppTab, val label: Phrase, val selected: ImageVector, val unselected: ImageVector)
 
@@ -80,7 +83,8 @@ class BookActions(
     val onRead: (BookEntity) -> Unit,
     /** "Listen": the translated pages read aloud. */
     val onListen: (BookEntity) -> Unit,
-    val onCopy: () -> Unit,
+    /** Copies the book's translated text. */
+    val onCopy: (BookEntity) -> Unit,
     val onDelete: (BookEntity) -> Unit,
 )
 
@@ -141,6 +145,8 @@ private fun MainScreen(
     val keySaved by viewModel.keySaved.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    val guide = LocalGuide.current
 
     // Storage Access Framework pickers: no storage permission required.
     val bookPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -180,14 +186,17 @@ private fun MainScreen(
         onExport = viewModel::saveToDownloads,
         onRead = viewModel::readNow,
         onListen = viewModel::listen,
-        onCopy = {
-            val message = try {
-                clipboard.setText(AnnotatedString(viewModel.plainText()))
-                "Copied the translated pages"
-            } catch (e: RuntimeException) {
-                "Too large for the clipboard; use Export instead"
+        onCopy = { book ->
+            scope.launch {
+                val text = viewModel.plainText(book)
+                val message = try {
+                    clipboard.setText(AnnotatedString(text))
+                    "Copied the translated pages"
+                } catch (e: RuntimeException) {
+                    "Too large for the clipboard; use Save to Downloads instead"
+                }
+                viewModel.showMessage(message)
             }
-            viewModel.showMessage(message)
         },
         onDelete = viewModel::delete,
     )
@@ -271,7 +280,7 @@ private fun MainScreen(
                         title = {
                             Text(
                                 when (tab) {
-                                    AppTab.TRANSLATE -> DASHBOARD_TITLE
+                                    AppTab.TRANSLATE -> Say.tabTranslate.text()
                                     AppTab.LIBRARY -> Say.tabBooks.text()
                                     AppTab.SETTINGS -> Say.tabSettings.text()
                                 },
@@ -280,8 +289,14 @@ private fun MainScreen(
                         },
                         actions = {
                             when (tab) {
-                                AppTab.TRANSLATE -> IconButton(onClick = onShowTutorial) {
-                                    Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Show the tutorial")
+                                AppTab.TRANSLATE -> {
+                                    // 🔊 "Hear how it works", for people who may not read.
+                                    IconButton(onClick = { guide.sayNow(Say.welcome) }) {
+                                        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = Say.help.text())
+                                    }
+                                    IconButton(onClick = onShowTutorial) {
+                                        Icon(Icons.AutoMirrored.Filled.HelpOutline, contentDescription = "Show the tutorial")
+                                    }
                                 }
                                 // "Aa": font and text size of the translated text.
                                 AppTab.LIBRARY -> IconButton(onClick = { showTextSettings = true }) {
@@ -313,7 +328,6 @@ private fun MainScreen(
                     when (shown) {
                         AppTab.TRANSLATE -> DashboardTab(
                             state = state,
-                            livePage = livePage,
                             listState = dashboardList,
                             targets = targets,
                             actions = actions,
@@ -328,7 +342,6 @@ private fun MainScreen(
                                     withTerms { showConsent = true }
                                 }
                             },
-                            onOpenLibrary = { viewModel.selectTab(AppTab.LIBRARY) },
                         )
                         AppTab.LIBRARY -> LibraryTab(
                             state = state,

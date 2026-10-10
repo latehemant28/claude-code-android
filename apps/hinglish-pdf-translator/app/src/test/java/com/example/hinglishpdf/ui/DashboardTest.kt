@@ -8,7 +8,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
-import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToKey
@@ -79,6 +78,11 @@ class DashboardTest {
         }
     }
 
+    private fun clipboardText(): String {
+        val clipboard = compose.activity.getSystemService(android.content.ClipboardManager::class.java)
+        return clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+    }
+
     private fun tab(label: String) = compose.onNode(hasText(label) and isSelectable())
 
     @Test
@@ -92,68 +96,79 @@ class DashboardTest {
             }
         }
 
-        // Hindi, in pictures: the title, the badge, the spoken-help button and big tiles.
+        // Hindi: the hero and its badge, the key and language tiles side by side, the green button.
         compose.onNodeWithText(DASHBOARD_TITLE).assertIsDisplayed()
         compose.onNodeWithText(BYOK_BADGE_TEXT).assertIsDisplayed()
-        compose.onNodeWithText(Say.help.hi).assertIsDisplayed()
-        compose.onNodeWithText(Say.keyTitle.hi).assertIsDisplayed()
+        compose.onNodeWithContentDescription(Say.help.hi).assertIsDisplayed() // 🔊 in the top bar
+        compose.onNodeWithText(Say.aiKey.hi).assertIsDisplayed()
+        compose.onNodeWithText(Say.tapToAddKey.hi).assertIsDisplayed()
+        compose.onNodeWithText(Say.translateTo.hi).assertIsDisplayed()
         compose.onNodeWithText("हिन्दी").assertIsDisplayed()
-        compose.onNodeWithText(Say.chooseBook.hi).assertIsDisplayed()
+        compose.onNodeWithText(Say.chooseBookFile.hi).assertIsDisplayed()
         compose.onNodeWithText("Model (optional)").assertDoesNotExist()
         listOf(Say.tabTranslate, Say.tabBooks, Say.tabSettings).forEach { tab(it.hi).assertIsDisplayed() }
-        assertTrue(compose.onAllNodesWithContentDescription("Listen to this").fetchSemanticsNodes().size >= 3)
         screenshot("dashboard-no-key")
 
-        // The key tile opens the settings sheet (for the helper); the model name is folded away.
-        compose.onNodeWithText(Say.keyTitle.hi).performClick()
-        compose.onNodeWithText("AI provider & API key").assertIsDisplayed()
+        // The key tile opens the key sheet (for the helper); the model name is folded away.
+        compose.onNodeWithText(Say.tapToAddKey.hi).performClick()
+        compose.onNodeWithText(PROVIDER_SHEET_TITLE).assertIsDisplayed()
         compose.onNodeWithText("Get API Key").assertIsDisplayed()
         compose.onNodeWithText("Model (optional)").assertDoesNotExist()
-        screenshot("provider-sheet")
-        compose.onNodeWithText("Advanced Settings").performClick()
+        screenshotDialog("provider-sheet")
+        compose.onNodeWithText("Stored only on this phone.").assertIsDisplayed()
+        compose.onNodeWithText("Advanced").performClick()
         compose.onNodeWithText("Model (optional)").assertIsDisplayed()
-        screenshot("provider-sheet-advanced")
+        screenshotDialog("provider-sheet-advanced")
 
-        // With a key: a green tick, the provider and "ready".
+        // With a key: a green tick, the provider and "connected".
         compose.runOnUiThread {
             vm.saveApiKey(AIProvider.GROQ, "gsk_" + "x".repeat(40))
             vm.selectProvider(AIProvider.GROQ)
         }
         compose.waitForIdle()
         compose.onNodeWithText("Groq").assertIsDisplayed()
-        compose.onNodeWithText(Say.keyReady.hi).assertIsDisplayed()
+        compose.onNodeWithText(Say.connected.hi).assertIsDisplayed()
         screenshot("dashboard-ready")
 
         // Choosing a book first asks, in words, pictures and voice: green ✅ or red ❌.
         val started = org.robolectric.Shadows.shadowOf(compose.activity)
         while (started.nextStartedActivity != null) Unit // e.g. the notification permission request
-        compose.onNodeWithText(Say.chooseBook.hi).performClick()
+        compose.onNodeWithText(Say.chooseBookFile.hi).performClick()
         compose.onNodeWithText(Say.consentTitle.hi).assertIsDisplayed()
         compose.onNodeWithText(uploadConsentText(AIProvider.GROQ).hi).assertExists()
         screenshotDialog("upload-consent")
         compose.onNodeWithText(Say.no.hi).performClick()
         compose.onNodeWithText(Say.consentTitle.hi).assertDoesNotExist()
         assertEquals(null, started.nextStartedActivity) // No: nothing picked
-        compose.onNodeWithText(Say.chooseBook.hi).performClick()
+        compose.onNodeWithText(Say.chooseBookFile.hi).performClick()
         compose.onNodeWithText(Say.yesSend.hi).performClick()
         val picker = started.nextStartedActivity
         assertEquals(android.content.Intent.ACTION_OPEN_DOCUMENT, picker?.action)
         compose.onNodeWithText(Say.consentTitle.hi).assertDoesNotExist()
 
-        // The latest book: a progress ring and big Listen / Read buttons.
+        // The latest book: a progress ring and Listen / Read buttons.
         compose.onNode(hasScrollAction()).performScrollToKey("current")
-        compose.onNodeWithText(Say.listen.hi).assertIsDisplayed()
-        compose.onNodeWithText(Say.read.hi).assertIsDisplayed()
+        compose.onNodeWithContentDescription(Say.listen.hi).assertIsDisplayed()
+        compose.onNodeWithContentDescription(Say.read.hi).assertIsDisplayed()
         compose.onNodeWithText("100%").assertIsDisplayed()
         screenshot("dashboard-latest-book")
 
-        // My books: the same big buttons; the rest in the ⋮ menu.
+        // My books: ring and status on the left, quick actions; the rest in the ⋮ menu.
         tab(Say.tabBooks.hi).performClick()
-        compose.onNodeWithText("📚 1   ✅ 1").assertIsDisplayed()
-        compose.onNodeWithText(Say.listen.hi).assertIsDisplayed()
+        compose.onNodeWithText("Cold Morning").assertIsDisplayed()
+        compose.onNodeWithText(Say.done.hi).assertIsDisplayed()
+        compose.onNodeWithText(Say.pagesDone(1, "1").hi, substring = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription(Say.listen.hi).assertIsDisplayed()
         screenshot("library")
         compose.onNodeWithContentDescription("More actions").performClick()
         compose.onNodeWithText("Save EPUB to Downloads").assertIsDisplayed()
+        compose.onNodeWithText("Copy text").assertIsDisplayed()
+        compose.onNodeWithText("Copy text").performClick()
+        compose.waitUntil(10_000) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            clipboardText().startsWith("— 1 —")
+        }
+        compose.onNodeWithContentDescription("More actions").performClick()
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Delete “Cold Morning”?").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
@@ -168,7 +183,7 @@ class DashboardTest {
 
         // Listen: the translated pages, part by part, ready to be read aloud.
         tab(Say.tabBooks.hi).performClick()
-        compose.onNodeWithText(Say.listen.hi).performClick()
+        compose.onNodeWithContentDescription(Say.listen.hi).performClick()
         compose.waitUntil(10_000) {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             vm.listening.value != null
@@ -177,7 +192,7 @@ class DashboardTest {
         compose.runOnUiThread { vm.closeListen() }
 
         // Read writes a private reading copy and opens the reader.
-        compose.onNodeWithText(Say.read.hi).performClick()
+        compose.onNodeWithContentDescription(Say.read.hi).performClick()
         try {
             compose.waitUntil(10_000) {
                 // Lets the export's result (from the IO thread) reach Robolectric's main looper.
@@ -200,7 +215,7 @@ class DashboardTest {
         compose.onNodeWithText(DASHBOARD_TITLE).assertIsDisplayed()
         screenshot("dashboard-dark")
         tab(Say.tabBooks.hi).performClick()
-        compose.onNodeWithText(Say.listen.hi).assertIsDisplayed()
+        compose.onNodeWithContentDescription(Say.listen.hi).assertIsDisplayed()
         screenshot("library-dark")
         tab(Say.tabSettings.hi).performClick()
         screenshot("settings-dark")

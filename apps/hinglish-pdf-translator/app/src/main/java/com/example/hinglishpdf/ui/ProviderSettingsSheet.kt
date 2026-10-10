@@ -1,14 +1,25 @@
 package com.example.hinglishpdf.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
+import com.example.hinglishpdf.ui.theme.brand
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -34,14 +45,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,11 +66,15 @@ import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.settings.ProviderSettings
 
+/** The key sheet's title. */
+const val PROVIDER_SHEET_TITLE = "AI provider & key"
+
 /**
- * "AI provider & API key": the provider dropdown, "Get API Key" (the
- * provider's own key page in the in-app browser; a key copied there is
- * pasted into the field when it closes), the key itself, and, folded away
- * under "Advanced Settings", the optional model name.
+ * "AI provider & key": the provider dropdown (✓ for providers with a key),
+ * "Get API Key" (the provider's own key page in the in-app browser; a key
+ * copied there is saved or pasted into the field when it closes), the key
+ * with Paste and show / hide, and, folded away under "Advanced", the optional
+ * model name.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,13 +160,13 @@ fun ProviderSettingsContent(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .imePadding()
-            .padding(horizontal = 24.dp)
+            .padding(horizontal = 16.dp)
             .padding(bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("AI provider & API key", style = MaterialTheme.typography.titleLarge)
+        Text(PROVIDER_SHEET_TITLE, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
-        // 1. Provider dropdown, above the key field.
+        // 1. Provider picker; ✓ marks providers that already have a key.
         var expanded by rememberSaveable { mutableStateOf(false) }
         ExposedDropdownMenuBox(expanded = expanded && !busy, onExpandedChange = { if (!busy) expanded = it }) {
             OutlinedTextField(
@@ -162,6 +175,11 @@ fun ProviderSettingsContent(
                 readOnly = true,
                 enabled = !busy,
                 label = { Text("AI provider") },
+                leadingIcon = if (settings.configured) {
+                    { Icon(Icons.Filled.CheckCircle, contentDescription = "Key saved", tint = MaterialTheme.brand.success) }
+                } else {
+                    null
+                },
                 supportingText = if (busy) {
                     { Text("Pause the translation to change the provider") }
                 } else {
@@ -173,15 +191,12 @@ fun ProviderSettingsContent(
             )
             ExposedDropdownMenu(expanded = expanded && !busy, onDismissRequest = { expanded = false }) {
                 AIProvider.entries.forEach { option ->
+                    val hasKey = settings.key(option).isNotBlank()
                     DropdownMenuItem(
-                        text = {
-                            Column {
-                                Text(option.displayName)
-                                Text(
-                                    if (settings.key(option).isNotBlank()) "Key saved" else "No key yet",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                        text = { Text(option.displayName) },
+                        trailingIcon = {
+                            if (hasKey) {
+                                Icon(Icons.Filled.CheckCircle, contentDescription = "Key saved", tint = MaterialTheme.brand.success, modifier = Modifier.size(18.dp))
                             }
                         },
                         onClick = {
@@ -194,17 +209,26 @@ fun ProviderSettingsContent(
             }
         }
 
-        // 2. The key.
         if (settings.configured) {
-            Text("Ready · ${activeModel ?: "model picked automatically"}", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Needs an internet connection. ${provider.dataNote}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // 2a. Ready: what answers, and the key's origin.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.brand.success)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Ready · ${activeModel ?: "model picked automatically"}", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Needs an internet connection. ${provider.dataNote}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             when (settings.keySource(provider)) {
-                ProviderSettings.KeySource.ENTERED_IN_APP ->
-                    TextButton(onClick = { onRemoveKey(provider) }, enabled = !busy) { Text("Remove saved API key") }
+                ProviderSettings.KeySource.ENTERED_IN_APP -> OutlinedButton(
+                    onClick = { onRemoveKey(provider) },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Remove saved API key") }
                 ProviderSettings.KeySource.BUILD_CONFIG -> Text(
                     "Key from local.properties (built into this app).",
                     style = MaterialTheme.typography.bodySmall,
@@ -213,15 +237,15 @@ fun ProviderSettingsContent(
                 ProviderSettings.KeySource.NONE -> Unit
             }
         } else {
-            Text(
-                "Paste your ${provider.displayName} API key. It is kept only on this phone.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            FilledTonalButton(onClick = { onBrowserOpenChange(true) }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.Key, contentDescription = null)
+            // 2b. Get the key (the provider's own page, in the in-app browser), then paste it.
+            OutlinedButton(onClick = { onBrowserOpenChange(true) }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Icon(Icons.Filled.Key, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Get API Key")
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
             }
+            var visible by rememberSaveable { mutableStateOf(false) }
             OutlinedTextField(
                 value = key,
                 onValueChange = {
@@ -230,37 +254,46 @@ fun ProviderSettingsContent(
                 },
                 label = { Text("${provider.displayName} API key") },
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                supportingText = if (pasted) {
-                    { Text("Pasted the key you copied. Check it, then tap Save key.") }
-                } else {
-                    null
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                supportingText = {
+                    Text(if (pasted) "Pasted the key you copied. Check it, then tap Save key." else "Stored only on this phone.")
                 },
                 trailingIcon = {
-                    IconButton(onClick = { clipboard.getText()?.text?.trim()?.let { key = it } }) {
-                        Icon(Icons.Filled.ContentPaste, contentDescription = "Paste")
+                    Row {
+                        IconButton(onClick = { visible = !visible }) {
+                            Icon(
+                                if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (visible) "Hide key" else "Show key",
+                            )
+                        }
+                        IconButton(onClick = { clipboard.getText()?.text?.trim()?.takeIf { it.isNotEmpty() }?.let { key = it } }) {
+                            Icon(Icons.Filled.ContentPaste, contentDescription = "Paste")
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = { onSaveKey(provider, key) }, enabled = key.length >= 20) { Text("Save key") }
         }
 
-        // 3. Advanced Settings (folded away): the optional model name.
+        // 3. Advanced (folded away): the optional model name.
         var advanced by rememberSaveable { mutableStateOf(false) }
+        val arrow by animateFloatAsState(if (advanced) 180f else 0f, label = "advanced")
         Row(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(MaterialTheme.shapes.small)
                 .clickable { advanced = !advanced }
                 .padding(vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Advanced Settings", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            Text("Advanced", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
             Icon(
-                if (advanced) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                Icons.Filled.ExpandMore,
                 contentDescription = if (advanced) "Hide advanced settings" else "Show advanced settings",
+                modifier = Modifier.rotate(arrow),
             )
         }
         AnimatedVisibility(visible = advanced) {
@@ -286,6 +319,14 @@ fun ProviderSettingsContent(
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+
+        if (!settings.configured) {
+            Button(
+                onClick = { onSaveKey(provider, key) },
+                enabled = key.length >= 20,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) { Text("Save key", style = MaterialTheme.typography.titleMedium) }
         }
     }
 }

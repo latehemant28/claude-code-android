@@ -1,6 +1,6 @@
 # BYOK Translator (Android)
 
-> **BYOK Model - 100% Free & Private Translation**: bring your own AI key;
+> **Bring your own key (BYOK) · 100% Free & Private Translation**: bring your own AI key;
 > the app adds no subscription, no markup and no server of its own.
 
 An Android app that translates whole books (PDFs and EPUBs) **from any
@@ -15,8 +15,8 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
 - **Modern, sense-for-sense:** one prompt for every language pair that asks
   for context first, everyday vocabulary (no Sanskritized Hindi, no archaic
   Spanish), adapted idioms, and untouched names and speaker labels.
-- **First launch:** a "Select your Target Language" popup, then a spotlight
-  tour of the main screen (language → AI key → upload).
+- **First launch:** a "Choose your language" sheet, then a spotlight
+  tour of the main screen (AI key → language → choose a book).
 - **Resilient:** each provider is paced for its free tier; a rate limit
   pauses 60 s ("Pausing for 60s to refresh limit...") and retries by itself;
   if a provider fails for good (no credit, bad key, daily quota), the book
@@ -55,22 +55,27 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
     signing up on its website, which needs someone who can read. The app
     says so ("किसी जानकार से एक बार लगवा लें"); after that, everything is
     pictures and voice.
-- **Simple, three tabs:** **Translate**, **Library** and **Settings**, in an
-  indigo / slate Material 3 theme, light or dark with the phone.
-- **Dashboard** (titled **Bring your own key**, under the BYOK badge): a
-  "🔊 Hear how it works" button, then the key, language and green book
-  tiles; below, the book being translated, with a progress ring and big
-  **Listen** / **Read** / **Pause** buttons. The book's own language (From)
-  and the output format are in Settings.
+- **Simple, three tabs:** **Translate**, **My books** and **Settings**, in a
+  deep indigo / purple Material 3 theme, light or dark with the phone.
+- **Translate tab:** the **Bring your own key (BYOK)** title with the
+  **100% Free & Private Translation** badge; two tiles side by side, the
+  **AI key** (provider, ✓ Connected or ⚠ Tap to add a key) and the
+  **language** (e.g. Hindi · हिन्दी); the big green **Choose a book
+  (PDF/EPUB)** button; and the book being translated, with a progress ring,
+  its page and **Pause** / **Read** / **Listen** buttons. 🔊 in the top bar
+  says how it works; each tile says what it does when tapped (spoken help).
+  The book's own language (From) and the output format are in Settings.
 - **Consent before every upload:** choosing a file first shows **"Your
   file's text will be sent to AI"**: which provider gets the text, that only
   text is sent (pictures stay on the phone), that the provider's privacy
   terms apply, and to avoid confidential documents. The file picker opens
   only after ticking **"I agree to send this file's text to …"** and tapping
   **Agree & choose file**.
-- **My books:** every book with a progress ring and big **Listen**,
-  **Read**, **Pause** / **Resume** buttons; **Save to Downloads**, **Copy
-  text** and **Delete** are in its ⋮ menu.
+- **My books:** every book as a card: progress ring and status tag
+  (Translating / Paused / Done) on the left, title and pages in the middle
+  with **Pause** / **Resume**, **Read** and **Listen**; **Save to
+  Downloads**, **Copy text** and **Delete** are in its ⋮ menu. Tapping a
+  card shows its translated pages below the list.
 - **In-app reader:** opens a finished book inside the app (PDF pages with
   `PdfRenderer`, EPUB chapters in a local WebView), edge to edge, with bars
   that hide while you read, dark mode and gliding text size / zoom.
@@ -138,7 +143,7 @@ without a key) opens the settings sheet:
    paste button still works by hand. A key copied outside the app (e.g. after
    the browser fallback below) is saved the moment the settings sheet is
    back in front.
-3. **Advanced Settings** (folded away by default): **Model (optional)**;
+3. **Advanced** (folded away by default): **Model (optional)**;
    leave empty to use the provider's defaults in order, or type a model name
    to try first.
 
@@ -335,20 +340,24 @@ English otherwise.
 
 ### First launch
 
-1. **"Select your Target Language"**: a popup with the 27 languages (native
-   names shown). Tapping one sets the **To** language on the main screen;
-   **Not now** keeps Hindi.
+1. **"Choose your language"**: a bottom sheet with the 27 languages, each
+   in its own script first (हिन्दी, Español...) with a radio button; tapping
+   one says its name, **Continue** sets the **To** language on the main
+   screen, and swiping the sheet away keeps Hindi. The language tile opens
+   the same sheet later.
 2. **Spotlight tour** ([`FirstLaunch.kt`](app/src/main/java/com/example/hinglishpdf/ui/FirstLaunch.kt)):
    the screen dims except one element at a time, with a pulsing ring and one
-   line of help, in the order of the steps: the **AI key** → the
-   **language** → the **Select PDF / EPUB** button. A tap anywhere moves on; **Skip tour** ends
-   it. The list scrolls a target onto the screen when needed.
+   tooltip card, in the order of the steps: the **AI key** → the
+   **language** → the green **Choose a book** button. **Next** (or a tap
+   anywhere) moves on, **Got it** ends it on the last step, **Skip** ends
+   it at once. The list scrolls a target onto the screen when needed.
 
 Both show by themselves only on the very first launch (flags written in
 SharedPreferences the moment they appear; people updating see them once).
 The tour can be replayed from the **?** in the dashboard's top bar or from
 **Settings → Show the tutorial**. The dashboard always starts with the
-**BYOK Model - 100% Free & Private Translation** badge.
+**Bring your own key (BYOK)** title and its **100% Free & Private
+Translation** badge.
 
 All illustrations on screen (the badge, the AI engine chip in **Choose Your
 AI Engine**, the spotlight's dimmed layer with its cut-out) are drawn with

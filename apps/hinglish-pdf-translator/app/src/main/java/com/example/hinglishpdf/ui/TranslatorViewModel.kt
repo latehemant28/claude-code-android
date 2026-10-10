@@ -469,9 +469,12 @@ class TranslatorViewModel(
         }
     }
 
-    /** All translated pages as plain text, with bullets, numbering and page breaks. */
-    fun plainText(): String =
-        pages.value.joinToString("\n\n") { page -> "— ${page.pageNumber} —\n\n${page.translatedText.orEmpty()}" }
+    /** All translated pages of [book] as plain text, with bullets, numbering and page breaks. */
+    suspend fun plainText(book: BookEntity): String = withContext(Dispatchers.IO) {
+        app.db.pageDao().pages(book.id)
+            .filter { it.translatedText != null }
+            .joinToString("\n\n") { page -> "— ${page.pageNumber} —\n\n${page.translatedText.orEmpty()}" }
+    }
 
     fun showMessage(text: String) = local.update { it.copy(message = text) }
 
