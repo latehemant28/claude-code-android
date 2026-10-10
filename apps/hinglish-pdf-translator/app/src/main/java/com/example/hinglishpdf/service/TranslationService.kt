@@ -14,6 +14,7 @@ import com.example.hinglishpdf.HinglishApp
 import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.document.DocumentFormatter
+import com.example.hinglishpdf.data.translate.PageEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -117,11 +118,33 @@ class TranslationService : Service() {
             while (true) {
                 val page = pages.nextUntranslated(id) ?: break
                 val label = "Translating $unit ${page.pageNumber} of ${book.pageCount}..."
-                app.monitor.update { it.copy(label = label, liveText = "", coolingDown = false) }
+                app.monitor.update {
+                    it.copy(
+                        label = label, page = page.pageNumber, chunk = 0, chunkCount = 0,
+                        pageBlocks = page.sourceBlocks, pageTranslations = emptyList(),
+                        liveText = "", coolingDown = false,
+                    )
+                }
                 showProgress(book, label, page.pageNumber - 1, book.pageCount)
 
-                val translations = app.pageTranslator.translatePage(page.sourceBlocks, book.language) { text ->
-                    app.monitor.update { it.copy(liveText = text) }
+                // Micro-chunks of the page stream in; the page is saved only once complete.
+                var translations: List<String?> = emptyList()
+                app.pageTranslator.translatePage(page.sourceBlocks).collect { event ->
+                    when (event) {
+                        is PageEvent.ChunkStarted -> {
+                            app.monitor.update {
+                                it.copy(chunk = event.chunk, chunkCount = event.chunkCount, liveText = "")
+                            }
+                            if (event.chunkCount > 1) {
+                                showProgress(book, "$label (part ${event.chunk}/${event.chunkCount})", page.pageNumber - 1, book.pageCount)
+                            }
+                        }
+                        is PageEvent.Token -> app.monitor.update { it.copy(liveText = it.liveText + event.text) }
+                        is PageEvent.ChunkFinished -> app.monitor.update {
+                            it.copy(pageTranslations = event.translations, liveText = "")
+                        }
+                        is PageEvent.PageFinished -> translations = event.translations
+                    }
                 }
                 pages.saveTranslation(
                     bookId = id,
@@ -134,7 +157,9 @@ class TranslationService : Service() {
 
                 // 3. Let the phone cool down now and then.
                 app.thermal.afterPage(pagesThisRun) { message ->
-                    app.monitor.update { it.copy(label = message, liveText = "", coolingDown = true) }
+                    app.monitor.update {
+                        it.copy(label = message, liveText = "", pageBlocks = emptyList(), coolingDown = true)
+                    }
                     showProgress(book, message, page.pageNumber, book.pageCount)
                 }
             }

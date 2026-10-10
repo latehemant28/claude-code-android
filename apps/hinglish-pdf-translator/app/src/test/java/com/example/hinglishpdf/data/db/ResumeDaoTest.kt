@@ -6,7 +6,6 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
-import com.example.hinglishpdf.data.translate.TargetLanguage
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -39,7 +38,7 @@ class ResumeDaoTest {
         db.bookDao().insert(
             BookEntity(
                 title = "Book", format = DocFormat.PDF, sourcePath = "/x",
-                language = TargetLanguage.HINGLISH, status = status, createdAt = createdAt,
+                status = status, createdAt = createdAt,
             ),
         )
 

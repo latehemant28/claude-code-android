@@ -1,12 +1,8 @@
 package com.example.hinglishpdf.data.text
 
 /**
- * Splits extracted PDF text into chunks small enough for an on-device LLM.
- *
- * Small models (Gemma 1B/2B, Llama 3.2 3B) are typically run with a KV cache
- * of 1-4k tokens, and that budget is shared by the prompt *and* the answer.
- * 400 English words are roughly 520-600 tokens, which leaves room for the
- * instruction and a translation of similar length.
+ * Word counting and sentence-aware splitting of text into pieces small enough
+ * for an on-device LLM (see BlockChunker for the 100-150 word micro-chunks).
  *
  * Chunks follow natural boundaries where possible, in this order:
  *  1. whole paragraphs are packed together while they fit,

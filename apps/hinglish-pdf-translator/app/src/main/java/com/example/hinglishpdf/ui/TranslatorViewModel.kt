@@ -12,15 +12,17 @@ import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
 import com.example.hinglishpdf.data.llm.ModelStatus
-import com.example.hinglishpdf.data.translate.TargetLanguage
 import com.example.hinglishpdf.service.LiveStatus
 import com.example.hinglishpdf.service.TranslationService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -32,7 +34,7 @@ import java.io.File
 
 data class TranslatorUiState(
     val model: ModelStatus = ModelStatus.Preparing("Looking for a model…"),
-    val language: TargetLanguage = TargetLanguage.HINGLISH,
+    val allowCpu: Boolean = false,
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
@@ -48,8 +50,29 @@ data class TranslatorUiState(
     fun isRunning(book: BookEntity) = live.running && live.bookId == book.id
 }
 
+/** The page in progress, ready to draw: finished blocks plus the streaming micro-chunk. */
+data class LivePage(
+    val page: Int,
+    val chunk: Int,
+    val chunkCount: Int,
+    /** Finished blocks of this page, with their structure. */
+    val blocks: List<Pair<com.example.hinglishpdf.data.document.DocBlock, String>>,
+    /** The micro-chunk being written right now (Markdown as the model writes it). */
+    val streaming: String,
+) {
+    companion object {
+        fun from(s: LiveStatus) = LivePage(
+            page = s.page,
+            chunk = s.chunk,
+            chunkCount = s.chunkCount,
+            blocks = s.pageBlocks.mapIndexedNotNull { i, b -> s.pageTranslations.getOrNull(i)?.let { b to it } },
+            streaming = s.liveText.trim(),
+        )
+    }
+}
+
 private data class LocalState(
-    val language: TargetLanguage = TargetLanguage.HINGLISH,
+    val allowCpu: Boolean = false,
     val selectedBookId: Long? = null,
     val importing: Boolean = false,
     val message: String? = null,
@@ -58,16 +81,29 @@ private data class LocalState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
-    private val local = MutableStateFlow(LocalState())
+    private val local = MutableStateFlow(LocalState(allowCpu = app.settings.allowCpu))
 
     val state: StateFlow<TranslatorUiState> = combine(
         app.modelController.status,
         app.db.bookDao().observeAll(),
-        app.monitor.status,
+        // Only the coarse status here; the per-token text has its own flow below.
+        app.monitor.status.map { it.copy(liveText = "", pageTranslations = emptyList()) }.distinctUntilChanged(),
         local,
     ) { model, books, live, l ->
-        TranslatorUiState(model, l.language, books, l.selectedBookId, live, l.importing, l.message)
+        TranslatorUiState(model, l.allowCpu, books, l.selectedBookId, live, l.importing, l.message)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TranslatorUiState())
+
+    /**
+     * The page being translated, streamed micro-chunk by micro-chunk. The
+     * text is prepared on Dispatchers.Default (conflated, so a slow frame
+     * never backs up the model) and delivered to Compose on the main thread
+     * through viewModelScope.
+     */
+    val livePage: StateFlow<LivePage?> = app.monitor.status
+        .map { s -> if (!s.running || s.pageBlocks.isEmpty()) null else LivePage.from(s) }
+        .conflate()
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Translated pages of the selected book, straight from Room (updates as each page is saved). */
     val pages: StateFlow<List<PageEntity>> = state
@@ -86,7 +122,12 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         }
     }
 
-    fun setLanguage(language: TargetLanguage) = local.update { it.copy(language = language) }
+    /** Opt-in CPU fallback for phones whose GPU cannot run the model; reloads the model. */
+    fun setAllowCpu(allow: Boolean) {
+        app.settings.allowCpu = allow
+        local.update { it.copy(allowCpu = allow) }
+        if (!state.value.live.running) app.modelController.refresh()
+    }
 
     fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
 
@@ -106,7 +147,6 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
                         title = imported.title,
                         format = imported.format,
                         sourcePath = imported.file.absolutePath,
-                        language = local.value.language,
                     ),
                 )
                 local.update { it.copy(selectedBookId = id) }

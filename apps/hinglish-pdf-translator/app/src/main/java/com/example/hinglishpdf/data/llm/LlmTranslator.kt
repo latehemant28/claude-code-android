@@ -10,12 +10,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Owns the loaded model and picks the runtime from the file type:
- * `.litertlm` -> LiteRT-LM, `.task`/`.bin` -> MediaPipe.
+ * Owns the one loaded model (Qwen 2.5 1.5B on the GPU via MediaPipe).
  *
- * Loading is slow (seconds) and memory-hungry (1-3 GB), so do it once and keep
- * it. A [Mutex] makes sure only one generation runs at a time and that the
- * model is never closed in the middle of one.
+ * Loading is slow (seconds) and puts ~1.6 GB of weights on the GPU, so it
+ * happens once and the engine is reused for every micro-chunk. A [Mutex] makes
+ * sure only one generation runs at a time and that the model is never closed
+ * in the middle of one.
  */
 class LlmTranslator(private val context: Context) {
 
@@ -24,18 +24,13 @@ class LlmTranslator(private val context: Context) {
 
     val backendName: String? get() = engine?.backendName
 
-    /** Token budget of the loaded model; decides how much text goes in each prompt. */
-    val contextTokens: Int get() = engine?.contextTokens ?: 2048
+    val contextTokens: Int get() = engine?.contextTokens ?: 1280
 
-    suspend fun load(modelFile: File) = mutex.withLock {
+    suspend fun load(modelFile: File, allowCpu: Boolean) = mutex.withLock {
         withContext(Dispatchers.Default) {
             engine?.close()
             engine = null
-            engine = if (modelFile.name.endsWith(".litertlm", ignoreCase = true)) {
-                LiteRtLmEngine.create(context, modelFile)
-            } else {
-                MediaPipeEngine.create(context, modelFile)
-            }
+            engine = MediaPipeEngine.create(context, modelFile, allowCpu)
         }
     }
 

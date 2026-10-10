@@ -5,8 +5,8 @@ import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.text.TextChunker
 
 /**
- * One line of a prompt: a whole block, or one piece of a block that was too
- * long to send at once ([continuation] pieces carry no marker of their own).
+ * One block of a micro-chunk: a whole block, or one piece of a block that was
+ * too long for one chunk ([continuation] pieces carry no marker of their own).
  */
 data class TranslationUnit(
     val blockIndex: Int,
@@ -18,22 +18,25 @@ data class TranslationUnit(
 )
 
 /**
- * Groups blocks into prompt-sized parts without ever breaking a block's
- * structure: blocks are packed whole while they fit, and only a block longer
- * than the budget is split (at sentence boundaries).
- *
- * For PDFs this runs on ONE page at a time, and a normal page fits a single
- * prompt whole; it only splits a page that would overflow the model's context.
+ * Cuts ONE page into micro-chunks of 100-150 words before they reach the
+ * model, without ever breaking a block's structure: whole blocks are packed
+ * while they fit, and only a block longer than the limit is split, at
+ * sentence boundaries. Small chunks keep the prompt short (fast prefill, low
+ * memory, well inside a 1280-token model) and give a 1.5B model less to keep
+ * track of. The translations are stitched back per block afterwards.
  */
 object BlockChunker {
 
-    /** Small models lose track of line IDs in very long lists, so cap lines too. */
-    const val MAX_LINES_PER_CHUNK = 80
+    /** Upper bound of a micro-chunk; greedy packing lands most chunks at 100-150 words. */
+    const val MICRO_CHUNK_WORDS = 150
+
+    /** Few blocks per chunk, so the answer can be matched back reliably. */
+    const val MAX_BLOCKS_PER_CHUNK = 8
 
     fun chunk(
         blocks: List<DocBlock>,
-        maxWords: Int,
-        maxLines: Int = MAX_LINES_PER_CHUNK,
+        maxWords: Int = MICRO_CHUNK_WORDS,
+        maxLines: Int = MAX_BLOCKS_PER_CHUNK,
     ): List<List<TranslationUnit>> {
         require(maxWords > 0 && maxLines > 0)
         val chunks = mutableListOf<List<TranslationUnit>>()
@@ -57,15 +60,6 @@ object BlockChunker {
         if (current.isNotEmpty()) chunks += current.toList()
         return chunks
     }
-
-    /**
-     * Words per prompt for a model with [contextTokens] tokens. The prompt
-     * (guidelines + example) takes ~550 tokens; an English word is ~1.4 tokens
-     * and its Roman Hindi/Marathi translation ~3, so each word costs ~4.4.
-     * With a 4096-token model (Llama 3.2 3B) that is 700 words: a full,
-     * dense book page.
-     */
-    fun wordsFor(contextTokens: Int): Int = ((contextTokens - 550) / 4.4).toInt().coerceIn(60, 700)
 
     /**
      * Cuts a page-less document (EPUB) into consecutive page-sized sections

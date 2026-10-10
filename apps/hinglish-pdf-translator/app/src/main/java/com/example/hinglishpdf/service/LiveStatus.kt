@@ -11,7 +11,14 @@ data class LiveStatus(
     val bookId: Long? = null,
     /** "Translating page 45 of 300...", "Cooling down...", ... */
     val label: String = "",
-    /** The model's output for the page in progress. */
+    val page: Int = 0,
+    /** Micro-chunk in progress within the page, e.g. 2 of 4. */
+    val chunk: Int = 0,
+    val chunkCount: Int = 0,
+    /** The page's blocks and the translations finished so far (null = pending). */
+    val pageBlocks: List<com.example.hinglishpdf.data.document.DocBlock> = emptyList(),
+    val pageTranslations: List<String?> = emptyList(),
+    /** Raw model output for the micro-chunk being generated right now. */
     val liveText: String = "",
     val coolingDown: Boolean = false,
 )

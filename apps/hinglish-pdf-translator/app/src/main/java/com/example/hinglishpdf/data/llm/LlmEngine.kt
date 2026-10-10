@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 
 /** A loaded on-device model that turns one prompt into a streamed response. */
 interface LlmEngine {
-    /** "GPU" or "CPU", for display. */
+    /** "GPU" (or "CPU" when explicitly allowed), for display. */
     val backendName: String
 
     /** Prompt + response token budget of one generation. */
@@ -22,7 +22,7 @@ interface LlmEngine {
 
 class ChunkTooLargeException(tokens: Int, limit: Int) : IllegalStateException(
     "A chunk needs $tokens prompt tokens but only $limit fit next to the answer. " +
-        "Use a model with a larger context.",
+        "Use a model with a larger context (e.g. the ekv4096 build).",
 )
 
 /**

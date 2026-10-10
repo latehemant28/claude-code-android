@@ -44,7 +44,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +53,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -80,20 +80,23 @@ import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.bulletFor
 import com.example.hinglishpdf.data.llm.ModelStatus
-import com.example.hinglishpdf.data.translate.TargetLanguage
 
 /**
- * Recommended model: Llama 3.2 3B Instruct in LiteRT-LM format (~2.1 GB, 4k
- * context). Opened in the browser, so the app itself never needs internet.
+ * Qwen 2.5 1.5B Instruct, int8, 1280-token KV cache (~1.6 GB, Apache-2.0):
+ * the fastest variant on the GPU, and micro-chunks never need more context.
+ * Opened in the browser, so the app itself never needs internet.
  */
-private const val LLAMA_DOWNLOAD_URL =
-    "https://huggingface.co/mlboydaisuke/Llama-3.2-3B-Instruct-LiteRT/resolve/main/model.litertlm?download=true"
+private const val QWEN_DOWNLOAD_URL =
+    "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/" +
+        "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TranslatorScreen(viewModel: TranslatorViewModel) {
+    // Both collected on the main thread; the heavy work behind them runs on Dispatchers.Default.
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pages by viewModel.pages.collectAsStateWithLifecycle()
+    val livePage by viewModel.livePage.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
@@ -132,12 +135,14 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             item(key = "model") {
                 ModelCard(
                     status = state.model,
+                    allowCpu = state.allowCpu,
+                    onAllowCpu = viewModel::setAllowCpu,
                     canChange = state.model !is ModelStatus.Preparing && !state.live.running,
                     onImport = { modelPicker.launch(arrayOf("*/*")) },
                     onRescan = viewModel::rescanModel,
                     onDownload = {
                         try {
-                            uriHandler.openUri(LLAMA_DOWNLOAD_URL)
+                            uriHandler.openUri(QWEN_DOWNLOAD_URL)
                         } catch (e: Exception) {
                             viewModel.showMessage("No browser found to download the model")
                         }
@@ -147,10 +152,8 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 
             item(key = "new") {
                 NewBookCard(
-                    language = state.language,
                     enabled = state.canAddBook,
                     importing = state.importing,
-                    onLanguage = viewModel::setLanguage,
                     onPick = {
                         // Some file managers label EPUBs as generic binaries.
                         bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
@@ -201,8 +204,9 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             val selected = state.selected
             if (selected != null) {
                 val unit = selected.book.unitName.replaceFirstChar { it.uppercase() }
-                if (state.isRunning(selected.book) && state.live.liveText.isNotBlank()) {
-                    item(key = "live") { LiveCard(state.live.label, state.live.liveText) }
+                val live = livePage
+                if (state.isRunning(selected.book) && live != null) {
+                    item(key = "live") { LiveCard(state.live.label, live, unit) }
                 }
                 if (pages.isNotEmpty()) {
                     item(key = "preview-title") {
@@ -223,6 +227,8 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 @Composable
 private fun ModelCard(
     status: ModelStatus,
+    allowCpu: Boolean,
+    onAllowCpu: (Boolean) -> Unit,
     canChange: Boolean,
     onImport: () -> Unit,
     onRescan: () -> Unit,
@@ -233,7 +239,7 @@ private fun ModelCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Memory, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("On-device AI model", style = MaterialTheme.typography.titleSmall)
+                Text("Qwen 2.5 1.5B · on-device", style = MaterialTheme.typography.titleSmall)
             }
             when (status) {
                 is ModelStatus.Preparing -> {
@@ -246,15 +252,14 @@ private fun ModelCard(
                     }
                 }
                 is ModelStatus.Ready -> Text(
-                    "${status.fileName} · ${status.backend} · offline",
+                    "Ready on the ${status.backend} · temperature 0.2 · offline",
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 ModelStatus.Missing -> Text(
-                    "No model yet. Recommended: Llama 3.2 3B Instruct (2.1 GB, best Hindi). Tap " +
-                        "Download Llama (opens your browser, one time only), then Import model and " +
-                        "pick the downloaded model.litertlm.",
+                    "No model yet. Tap Download Qwen (1.6 GB, opens your browser, one time only), " +
+                        "then Import model and pick the downloaded .task file.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 is ModelStatus.Failed -> Text(
@@ -268,12 +273,26 @@ private fun ModelCard(
                     TextButton(onClick = onDownload) {
                         Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Download Llama")
+                        Text("Download Qwen")
                     }
                 }
                 TextButton(onClick = onImport, enabled = canChange) { Text("Import model") }
                 if (status is ModelStatus.Missing || status is ModelStatus.Failed) {
                     TextButton(onClick = onRescan, enabled = canChange) { Text("Rescan") }
+                }
+            }
+            // GPU only by default; the CPU is an explicit, visible opt-in.
+            if (status is ModelStatus.Failed || allowCpu) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Allow CPU", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Only if this phone's GPU can't run the model. Much slower.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = allowCpu, onCheckedChange = onAllowCpu, enabled = canChange)
                 }
             }
         }
@@ -282,32 +301,21 @@ private fun ModelCard(
 
 @Composable
 private fun NewBookCard(
-    language: TargetLanguage,
     enabled: Boolean,
     importing: Boolean,
-    onLanguage: (TargetLanguage) -> Unit,
     onPick: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Translate a book", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TargetLanguage.entries.forEach { option ->
-                    FilterChip(
-                        selected = option == language,
-                        onClick = { onLanguage(option) },
-                        label = { Text("${option.label} (${option.baseLanguage})") },
-                    )
-                }
-            }
+            Text("Translate a book into Hinglish", style = MaterialTheme.typography.titleSmall)
             Button(onClick = onPick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.UploadFile, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (importing) "Opening…" else "Select PDF / EPUB")
             }
             Text(
-                "Runs in the background, page by page. You can lock the phone; progress is saved " +
-                    "after every page and resumes after a crash or restart.",
+                "Runs in the background, page by page. You can lock the phone; every page is saved " +
+                    "as soon as it is done and translation resumes after a crash or restart.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -354,7 +362,7 @@ private fun BookCard(
                 BookStatus.FAILED -> "Stopped: ${book.error}"
             }
             Text(
-                "${book.language.label} · ${entry.translatedPages} of ${book.pageCount.takeIf { it > 0 } ?: "?"} ${unit}s · $status",
+                "${entry.translatedPages} of ${book.pageCount.takeIf { it > 0 } ?: "?"} ${unit}s · $status",
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             )
@@ -400,17 +408,35 @@ private fun BookCard(
     }
 }
 
+/** The page in progress: finished blocks with their structure, then the micro-chunk being written. */
 @Composable
-private fun LiveCard(label: String, liveText: String) {
-    val text = remember(liveText) { liveText.lines().joinToString("\n") { it.replace(TAG, "") }.trim() }
+private fun LiveCard(label: String, live: LivePage, unit: String) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(label, style = MaterialTheme.typography.labelLarge)
-            Text(
-                "$text▍",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (live.chunkCount > 0) {
+                Text(
+                    "$unit ${live.page} · micro-chunk ${live.chunk} of ${live.chunkCount}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                LinearProgressIndicator(
+                    progress = { (live.chunk - 1).coerceAtLeast(0).toFloat() / live.chunkCount },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            var previous: DocBlock? = null
+            for ((block, text) in live.blocks) {
+                BlockView(block, text, previous)
+                previous = block
+            }
+            if (live.streaming.isNotEmpty()) {
+                Text(
+                    "${live.streaming}▍",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -485,4 +511,3 @@ private fun BlockView(block: DocBlock, text: String, previous: DocBlock?) {
     }
 }
 
-private val TAG = Regex("^\\s*\\[\\d+]\\s?")

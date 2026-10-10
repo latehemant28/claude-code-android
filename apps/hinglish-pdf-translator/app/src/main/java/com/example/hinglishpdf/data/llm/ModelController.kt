@@ -26,6 +26,7 @@ sealed interface ModelStatus {
 class ModelController(
     private val files: ModelFileManager,
     private val translator: LlmTranslator,
+    private val settings: AppSettings,
     private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
@@ -53,14 +54,14 @@ class ModelController(
             val file = if (importUri != null) {
                 files.importModel(importUri) { p -> _status.value = ModelStatus.Preparing("Importing model…", p) }
             } else {
-                files.findModel { p -> _status.value = ModelStatus.Preparing("Unpacking built-in model…", p) }
+                files.findModel { p -> _status.value = ModelStatus.Preparing("Unpacking the built-in Qwen model (first launch only)…", p) }
             }
             if (file == null) {
                 _status.value = ModelStatus.Missing
                 return
             }
-            _status.value = ModelStatus.Preparing("Loading ${file.name} into memory… (up to a minute)")
-            translator.load(file)
+            _status.value = ModelStatus.Preparing("Loading ${file.name} onto the GPU…")
+            translator.load(file, allowCpu = settings.allowCpu)
             _status.value = ModelStatus.Ready(file.name, translator.backendName ?: "CPU")
         } catch (e: CancellationException) {
             throw e

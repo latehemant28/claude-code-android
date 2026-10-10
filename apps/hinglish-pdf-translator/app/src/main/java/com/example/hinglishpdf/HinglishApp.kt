@@ -4,6 +4,7 @@ import android.app.Application
 import com.example.hinglishpdf.data.db.AppDatabase
 import com.example.hinglishpdf.data.document.BookImporter
 import com.example.hinglishpdf.data.export.BookExporter
+import com.example.hinglishpdf.data.llm.AppSettings
 import com.example.hinglishpdf.data.llm.LlmTranslator
 import com.example.hinglishpdf.data.llm.ModelController
 import com.example.hinglishpdf.data.llm.ModelFileManager
@@ -27,7 +28,8 @@ class HinglishApp : Application() {
 
     val db by lazy { AppDatabase.create(this) }
     val translator by lazy { LlmTranslator(this) }
-    val modelController by lazy { ModelController(ModelFileManager(this), translator, appScope) }
+    val settings by lazy { AppSettings(this) }
+    val modelController by lazy { ModelController(ModelFileManager(this), translator, settings, appScope) }
     val pageTranslator by lazy { PageTranslator(translator) }
     val importer by lazy { BookImporter(this, PdfTextExtractor(this)) }
     val exporter by lazy { BookExporter(this, db) }

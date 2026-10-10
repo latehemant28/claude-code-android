@@ -1,68 +1,104 @@
 package com.example.hinglishpdf.data.translate
 
 import com.example.hinglishpdf.data.document.DocBlock
+import com.example.hinglishpdf.data.llm.ChunkTooLargeException
 import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.example.hinglishpdf.data.llm.LlmTranslator
-import kotlinx.coroutines.flow.fold
+import com.example.hinglishpdf.data.text.TextChunker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+
+/** Progress of one page, streamed as it is translated. */
+sealed interface PageEvent {
+    data class ChunkStarted(val chunk: Int, val chunkCount: Int) : PageEvent
+
+    /** New model output for the current micro-chunk. */
+    data class Token(val text: String) : PageEvent
+
+    /** A micro-chunk is done; [translations] holds every block finished so far. */
+    data class ChunkFinished(val chunk: Int, val chunkCount: Int, val translations: List<String?>) : PageEvent
+
+    /** The whole page: one entry per block (null = kept as-is, e.g. code). */
+    data class PageFinished(val translations: List<String?>) : PageEvent
+}
 
 /**
- * Translates ONE page: the whole page goes to the model in a single prompt
- * (split only if it would not fit the model's context), and the answer is
- * mapped back onto the page's headings, bullets, numbering and paragraphs.
+ * Translates ONE page: splits it into 100-150 word micro-chunks, runs them
+ * through the model one after another, and stitches the answers back onto the
+ * page's headings, bullets, numbering and paragraphs.
+ *
+ * Runs on [Dispatchers.Default]; collectors (the service, then the UI on the
+ * main thread) only receive small events.
  */
 class PageTranslator(private val translator: LlmTranslator) {
 
-    /**
-     * @return the translation of each block of [blocks] (null for blocks that
-     *   are not translated, such as code or a lone page number).
-     * @param onLiveText the model's raw output so far, for a live preview.
-     */
-    suspend fun translatePage(
-        blocks: List<DocBlock>,
-        language: TargetLanguage,
-        onLiveText: (String) -> Unit = {},
-    ): List<String?> {
+    fun translatePage(blocks: List<DocBlock>): Flow<PageEvent> = flow {
         val result = arrayOfNulls<String>(blocks.size)
-        val parts = BlockChunker.chunk(blocks, BlockChunker.wordsFor(translator.contextTokens))
         val pieces = mutableMapOf<Int, MutableList<String>>()
-        val live = StringBuilder()
+        val chunks = BlockChunker.chunk(blocks)
 
-        for (units in parts) {
-            val raw = translator.generate(HinglishPrompt.build(units, language)).fold(StringBuilder()) { acc, piece ->
-                acc.append(piece)
-                live.append(piece)
-                onLiveText(live.toString())
-                acc
+        chunks.forEachIndexed { index, units ->
+            emit(PageEvent.ChunkStarted(index + 1, chunks.size))
+            val translated = translateChunk(units, stream = this)
+
+            // Stitch: a block split across chunks is re-joined in order.
+            units.forEachIndexed { i, unit ->
+                val text = translated[i] ?: unit.text // never lose content
+                val parts = pieces.getOrPut(unit.blockIndex) { mutableListOf() }
+                if (!unit.continuation) parts.clear()
+                parts += text
+                result[unit.blockIndex] = parts.joinToString(" ")
             }
-            live.append('\n')
-            val results = HinglishPrompt.parse(raw.toString(), units).toMutableList()
+            emit(PageEvent.ChunkFinished(index + 1, chunks.size, result.toList()))
+        }
+        emit(PageEvent.PageFinished(result.toList()))
+    }.flowOn(Dispatchers.Default)
 
-            // Lines the model skipped or wrote in Devanagari: retry each on its own.
-            if (units.size > 1) {
-                units.forEachIndexed { i, unit ->
-                    val r = results[i]
-                    if (r == null || HinglishPrompt.containsDevanagari(r)) {
-                        results[i] = translateSingle(unit, language) ?: r
-                    }
+    /**
+     * One micro-chunk. If the answer cannot be matched block for block, or a
+     * block comes back in Devanagari, those blocks are re-translated one at a
+     * time.
+     */
+    private suspend fun translateChunk(
+        units: List<TranslationUnit>,
+        stream: FlowCollector<PageEvent>?,
+    ): List<String?> {
+        val results = try {
+            HinglishPrompt.parse(generate(HinglishPrompt.build(units), stream), units).toMutableList()
+        } catch (e: ChunkTooLargeException) {
+            if (units.size == 1) return listOf(translateOversized(units.single()))
+            MutableList<String?>(units.size) { null }
+        }
+        if (units.size > 1) {
+            units.forEachIndexed { i, unit ->
+                val r = results[i]
+                if (r == null || HinglishPrompt.containsDevanagari(r)) {
+                    results[i] = translateChunk(listOf(unit), stream = null).first() ?: r
                 }
             }
-
-            units.forEachIndexed { i, unit ->
-                // Fall back to the original text rather than losing content.
-                val text = results[i] ?: unit.text
-                val blockPieces = pieces.getOrPut(unit.blockIndex) { mutableListOf() }
-                if (!unit.continuation) blockPieces.clear()
-                blockPieces += text
-                result[unit.blockIndex] = blockPieces.joinToString(" ")
-            }
         }
-        return result.toList()
+        return results
     }
 
-    private suspend fun translateSingle(unit: TranslationUnit, language: TargetLanguage): String? {
-        val units = listOf(unit)
-        val raw = translator.generate(HinglishPrompt.build(units, language))
-            .fold(StringBuilder()) { acc, piece -> acc.append(piece) }
-        return HinglishPrompt.parse(raw.toString(), units).first()
+    /** Only for a model with a very small context: halve the text until it fits. */
+    private suspend fun translateOversized(unit: TranslationUnit): String? {
+        val words = TextChunker.countWords(unit.text)
+        if (words < 20) return null
+        return TextChunker.split(unit.text, words / 2).mapIndexed { i, piece ->
+            translateChunk(listOf(unit.copy(text = piece, continuation = unit.continuation || i > 0)), null).first()
+                ?: piece
+        }.joinToString(" ")
+    }
+
+    private suspend fun generate(prompt: String, stream: FlowCollector<PageEvent>?): String {
+        val out = StringBuilder()
+        translator.generate(prompt).collect { piece ->
+            out.append(piece)
+            stream?.emit(PageEvent.Token(piece))
+        }
+        return out.toString()
     }
 }

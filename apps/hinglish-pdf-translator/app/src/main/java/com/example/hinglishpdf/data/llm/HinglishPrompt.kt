@@ -1,109 +1,113 @@
 package com.example.hinglishpdf.data.llm
 
 import com.example.hinglishpdf.data.document.BlockKind
-import com.example.hinglishpdf.data.translate.TargetLanguage
 import com.example.hinglishpdf.data.translate.TranslationUnit
 
 /**
- * Builds the prompt for one page and parses the model's answer.
+ * The prompt sent with every micro-chunk, and the parser that maps the
+ * model's answer back onto the chunk's headings, bullets and paragraphs.
  *
- * The page goes in as one line per block, tagged with an ID and a
- * Markdown-style marker (`[3] ## Heading`, `[4] - bullet`, `[5] 2. step`).
- * The model answers line by line with the same IDs, so each translation is
- * matched back to its heading, bullet or paragraph even if the model drops a
- * marker or a line. The original markers are re-applied by the app, never
- * trusted from the model.
- *
- * Prompt layout: the style guidelines, the page-format rules with a worked
- * example, then the book-translation instruction followed by the page.
+ * The system prompt is embedded exactly as specified; the micro-chunk replaces
+ * [CHUNK_PLACEHOLDER]. The chunk itself is written as plain Markdown, one block
+ * per paragraph (`## Heading`, `- bullet`, `2. step`), which the prompt's
+ * "strictly preserve the original document's formatting, paragraphs, and
+ * bullet points" rule asks the model to keep.
  */
 object HinglishPrompt {
 
-    fun guidelines(language: TargetLanguage): String = """
-        Guidelines:
-        - Vocabulary: Keep technical terms, proper nouns, and industry jargon in English. Translate everyday verbs, connectors, and descriptive words into Roman ${language.baseLanguage} (e.g., ${language.vocabularyExamples}).
-        - Script: Use 100% English (Latin) letters. Do NOT use the Devanagari script.
-        - Flow: The output should read like a natural conversation between modern bilingual speakers (e.g., "${language.flowExample}").
-        - Formatting: Strictly maintain the original page's structure, including headings, bullet points, numbering, and paragraph breaks.
+    const val CHUNK_PLACEHOLDER = "[INSERT MICRO-CHUNK HERE]"
 
-        Page format:
-        - The page is given one block per line. Every line starts with an ID like [7], then its marker: # for a heading, - for a bullet point, 1. for a numbered item, > for a quote, nothing for a paragraph.
-        - Write exactly one output line for every input line, starting with the same ID and the same marker, in the same order. Never merge, split, skip or add lines.
+    /** Embedded exactly as specified (line breaks and spacing included). */
+    const val SYSTEM_PROMPT =
+        "You are an expert at translating English to natural, modern conversational Hinglish (Hindi written in Roman script). \n" +
+            "\n" +
+            "CORE RULES:\n" +
+            "- Do NOT use highly formal or pure Hindi words (like 'samavesh', 'vyatirikta', 'prabhavshali').\n" +
+            "- Keep it casual, modern, and easy to read, exactly like a WhatsApp chat between modern urban Indians.\n" +
+            "- Keep English words for technical terms, concepts, verbs, or common objects (e.g., 'discussion', 'points', 'exception', 'philosophy', 'system', 'optimize').\n" +
+            "- Strictly preserve the original document's formatting, paragraphs, and bullet points.\n" +
+            "- Output ONLY the translated text without any extra conversational filler.\n" +
+            "\n" +
+            "MODERN HINGLISH EXAMPLES:\n" +
+            "English: First, we need to plan the discussion points. You believe people can change.\n" +
+            "Hinglish: Pehle, hume discussion ke points plan karne honge. Aapko lagta hai ki log badal sakte hain.\n" +
+            "\n" +
+            "English: The system architecture is quite complex, but we can optimize the database queries easily.\n" +
+            "Hinglish: System architecture thoda complex hai, lekin hum database queries ko easily optimize kar sakte hain.\n" +
+            "\n" +
+            "English: Let's catch up later to finalize the project details and fix the bugs.\n" +
+            "Hinglish: Baad mein catch up karte hain taaki project details finalize kar sakein aur bugs fix kar dein.\n" +
+            "\n" +
+            "Translate this text in the exact same casual style:\n" +
+            CHUNK_PLACEHOLDER
 
-        Example input:
-        [1] ## Getting Started
-        [2] - Click the Next button to continue the setup.
-        [3] This step is important because it saves your settings.
+    fun build(units: List<TranslationUnit>): String =
+        SYSTEM_PROMPT.replace(CHUNK_PLACEHOLDER, chunkText(units))
 
-        Example output:
-        [1] ## Getting Started
-        [2] - ${language.exampleBullet}
-        [3] ${language.exampleParagraph}
-    """.trimIndent()
+    /** The micro-chunk as Markdown: one block per paragraph, original markers kept. */
+    fun chunkText(units: List<TranslationUnit>): String =
+        units.joinToString("\n\n") { unit -> marker(unit) + unit.text.replace(NEWLINES, " ").trim() }
 
-    /** The per-page instruction, word for word, with the chosen language filled in. */
-    fun instruction(language: TargetLanguage): String =
-        "Translate the following text into natural, conversational ${language.label} using ONLY the " +
-            "Latin/English alphabet. Keep technical terms in English. Do not output Devanagari script. " +
-            "Preserve all paragraphs, bullet points, and line breaks exactly as they appear in the source " +
-            "text. Output ONLY the translated text:"
-
-    fun build(units: List<TranslationUnit>, language: TargetLanguage): String = buildString {
-        append(guidelines(language))
-        append("\n\n")
-        append(instruction(language))
-        append('\n')
-        units.forEachIndexed { i, unit -> append(line(i + 1, unit)).append('\n') }
-    }
-
-    private fun line(id: Int, unit: TranslationUnit): String {
-        val text = unit.text.replace(NEWLINES, " ")
-        val marker = if (unit.continuation) "" else when (unit.kind) {
-            BlockKind.HEADING -> "#".repeat(unit.level.coerceIn(1, 6)) + " "
-            BlockKind.BULLET -> "  ".repeat(unit.level) + "- "
-            BlockKind.NUMBERED -> "  ".repeat(unit.level) + unit.marker + " "
-            BlockKind.QUOTE -> "> "
-            BlockKind.PARAGRAPH, BlockKind.CODE -> ""
-        }
-        return "[$id] $marker$text"
+    private fun marker(unit: TranslationUnit): String = if (unit.continuation) "" else when (unit.kind) {
+        BlockKind.HEADING -> "#".repeat(unit.level.coerceIn(1, 6)) + " "
+        BlockKind.BULLET -> "  ".repeat(unit.level) + "- "
+        BlockKind.NUMBERED -> "  ".repeat(unit.level) + unit.marker + " "
+        BlockKind.QUOTE -> "> "
+        BlockKind.PARAGRAPH, BlockKind.CODE -> ""
     }
 
     /**
-     * Maps the model's answer back to units: result[i] is the translation of
-     * units[i], or null if the model skipped it. Untagged lines that follow a
-     * tagged one are treated as its wrapped continuation.
+     * Maps the answer back to units: result[i] is the translation of units[i].
+     *
+     * The answer is split into blocks at blank lines and at lines that start a
+     * new heading, bullet or numbered item. When the block count matches the
+     * chunk, block i is unit i. When it does not (the model merged or split
+     * paragraphs), every entry is null and the caller re-translates the units
+     * one at a time, so nothing is ever misaligned. A single-unit chunk always
+     * gets the whole answer.
      */
     fun parse(raw: String, units: List<TranslationUnit>): List<String?> {
-        val result = arrayOfNulls<String>(units.size)
-        var lastId: Int? = null
-        for (rawLine in raw.lines()) {
-            val line = rawLine.trim()
-            if (line.isEmpty()) continue
-            val match = TAG.find(line)
-            if (match != null) {
-                val id = match.groupValues[1].toInt()
-                lastId = if (id in 1..units.size && result[id - 1] == null) {
-                    result[id - 1] = clean(match.groupValues[2], units[id - 1])
-                    id
-                } else {
-                    null
-                }
-            } else if (lastId != null) {
-                result[lastId - 1] = result[lastId - 1] + " " + clean(line, units[lastId - 1])
-            }
+        val blocks = splitBlocks(stripFiller(raw))
+        if (units.size == 1) {
+            val text = blocks.joinToString(" ") { stripMarker(it, units[0]) }.trim()
+            return listOf(text.takeIf { it.isNotEmpty() })
         }
-        // A single line answered without its tag is still the translation.
-        if (units.size == 1 && result[0] == null) {
-            result[0] = clean(raw.lines().filter { it.isNotBlank() }.joinToString(" ").trim(), units[0])
-        }
-        return result.map { it?.trim()?.takeIf(String::isNotEmpty) }
+        if (blocks.size != units.size) return List(units.size) { null }
+        return blocks.mapIndexed { i, block -> stripMarker(block, units[i]).trim().takeIf { it.isNotEmpty() } }
     }
 
     fun containsDevanagari(text: String): Boolean = text.any { it in 'ऀ'..'ॿ' }
 
-    /** Strips the markers the model echoed back, since the app re-applies the originals. */
-    private fun clean(text: String, unit: TranslationUnit): String {
-        var t = text.trim().removeSurrounding("**").trim()
+    /** Removes a leading "Hinglish:" label (the few-shot examples use one) and a "Here is..." line. */
+    private fun stripFiller(raw: String): String {
+        var text = raw.replace("\r\n", "\n").trim()
+        text = text.replace(PREAMBLE, "")
+        text = text.replace(LABEL, "")
+        return text.trim()
+    }
+
+    private fun splitBlocks(text: String): List<String> {
+        val blocks = mutableListOf<String>()
+        for (paragraph in text.split(BLANK_LINE)) {
+            val current = StringBuilder()
+            for (line in paragraph.lines()) {
+                val trimmed = line.trim()
+                if (trimmed.isEmpty()) continue
+                if (current.isNotEmpty() && STARTS_BLOCK.containsMatchIn(trimmed)) {
+                    blocks += current.toString()
+                    current.clear()
+                }
+                if (current.isNotEmpty()) current.append(' ')
+                current.append(trimmed.replace(LABEL, ""))
+            }
+            if (current.isNotEmpty()) blocks += current.toString()
+        }
+        return blocks
+    }
+
+    /** The app re-applies the original markers, so drop whatever the model echoed. */
+    private fun stripMarker(block: String, unit: TranslationUnit): String {
+        var t = block.trim()
         if (!unit.continuation) {
             t = when (unit.kind) {
                 BlockKind.HEADING -> t.replace(HEADING_MARK, "")
@@ -121,7 +125,10 @@ object HinglishPrompt {
     }
 
     private val NEWLINES = Regex("\\s*\\n\\s*")
-    private val TAG = Regex("^\\[(\\d{1,4})]\\s*(.*)$")
+    private val BLANK_LINE = Regex("\\n[ \\t]*\\n")
+    private val STARTS_BLOCK = Regex("^(#{1,6}\\s|[-*•]\\s|\\(?\\d{1,3}[.)]\\s|>\\s?)")
+    private val PREAMBLE = Regex("^(here is|here's|sure)[^\\n]*:\\s*\\n", RegexOption.IGNORE_CASE)
+    private val LABEL = Regex("^(hinglish|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
     private val HEADING_MARK = Regex("^#{1,6}\\s*")
     private val BULLET_MARK = Regex("^[-*•●◦▪]\\s+")
     private val NUMBER_MARK = Regex("^\\(?\\d{1,3}[.)]\\s+")

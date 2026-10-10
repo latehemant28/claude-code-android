@@ -14,7 +14,7 @@ class BlockChunkerTest {
     @Test
     fun `blocks are packed whole and never exceed the limit`() {
         val blocks = (1..20).map { DocBlock(BlockKind.PARAGRAPH, words(15, "b$it") + ".") }
-        val chunks = BlockChunker.chunk(blocks, maxWords = 50)
+        val chunks = BlockChunker.chunk(blocks, maxWords = 50, maxLines = 30)
         assertTrue(chunks.all { c -> c.sumOf { TextChunker.countWords(it.text) } <= 50 })
         assertEquals((0 until 20).toList(), chunks.flatten().map { it.blockIndex })
         assertTrue(chunks.flatten().none { it.continuation })
@@ -49,11 +49,14 @@ class BlockChunkerTest {
     }
 
     @Test
-    fun `a full book page fits one prompt on a 4k model`() {
-        assertEquals(700, BlockChunker.wordsFor(4096))
-        assertTrue(BlockChunker.wordsFor(1280) in 120..200)
+    fun `a page is cut into micro-chunks of at most 150 words and 8 blocks`() {
         val page = (1..12).map { DocBlock(BlockKind.PARAGRAPH, words(45, "p$it") + ".") } // 540 words
-        assertEquals(1, BlockChunker.chunk(page, BlockChunker.wordsFor(4096)).size)
+        val chunks = BlockChunker.chunk(page)
+        assertEquals(listOf(3, 3, 3, 3), chunks.map { it.size }) // 135 words each
+        assertTrue(chunks.all { c -> c.sumOf { TextChunker.countWords(it.text) } in 100..150 })
+
+        val bullets = (1..20).map { DocBlock(BlockKind.BULLET, "item $it") }
+        assertEquals(listOf(8, 8, 4), BlockChunker.chunk(bullets).map { it.size })
     }
 
     @Test

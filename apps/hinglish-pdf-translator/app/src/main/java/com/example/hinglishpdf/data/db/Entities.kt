@@ -7,7 +7,6 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
-import com.example.hinglishpdf.data.translate.TargetLanguage
 
 enum class BookStatus {
     /** Waiting for the service (or interrupted before it started). */
@@ -30,7 +29,12 @@ data class BookEntity(
     val format: DocFormat,
     /** Private copy of the picked file (the original URI may not stay readable). */
     val sourcePath: String,
-    val language: TargetLanguage,
+    /**
+     * Output language label. Always "Hinglish" now; kept as a plain string so
+     * databases written by earlier versions (which also had "Minglish") still
+     * open without a migration.
+     */
+    val language: String = "Hinglish",
     val pageCount: Int = 0,
     val status: BookStatus = BookStatus.QUEUED,
     val error: String? = null,

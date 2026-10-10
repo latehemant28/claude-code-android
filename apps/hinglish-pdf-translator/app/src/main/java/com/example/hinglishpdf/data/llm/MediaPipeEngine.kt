@@ -22,8 +22,10 @@ import java.io.File
 import java.util.concurrent.ExecutionException
 
 /**
- * Runs `.task`/`.bin` models (Gemma, Qwen 2.5 1.5B, ...) with MediaPipe's
- * LLM Inference API. Every prompt gets a fresh [LlmInferenceSession].
+ * Runs Qwen 2.5 1.5B Instruct (`.task`) with MediaPipe's LLM Inference API on
+ * the GPU delegate (OpenCL). Every micro-chunk gets a fresh
+ * [LlmInferenceSession]: no chat history, so the context never fills up, and
+ * the engine itself (weights on the GPU) is created once and reused.
  */
 class MediaPipeEngine private constructor(
     private val llm: LlmInference,
@@ -43,9 +45,9 @@ class MediaPipeEngine private constructor(
         val finished = CompletableDeferred<Unit>()
         var generating = false
         try {
-            // Keep at least ~55% of the budget for the answer: Hinglish output
-            // takes more tokens than the English it comes from.
-            val promptLimit = (contextTokens * 0.45).toInt()
+            // Leave room for the answer: Hinglish runs a little longer than
+            // the English it comes from.
+            val promptLimit = contextTokens - OUTPUT_RESERVE_TOKENS
             val promptTokens = session.sizeInTokens(prompt)
             if (promptTokens > promptLimit) throw ChunkTooLargeException(promptTokens, promptLimit)
 
@@ -93,20 +95,34 @@ class MediaPipeEngine private constructor(
     companion object {
         private const val TAG = "MediaPipeEngine"
         private const val TOP_K = 40
-        private const val TEMPERATURE = 0.3f
+
+        /** Low temperature: faithful, consistent translation. */
+        const val TEMPERATURE = 0.2f
         private const val CANCEL_TIMEOUT_MS = 10_000L
+
+        /** A 150-word micro-chunk translates to ~250-400 tokens. */
+        private const val OUTPUT_RESERVE_TOKENS = 500
 
         /**
          * Default token budget when the file name does not state one. Must not
-         * exceed the KV cache the model was exported with.
+         * exceed the KV cache the model was exported with (ekv1280 -> 1280).
          */
-        private const val DEFAULT_CONTEXT = 2048
+        private const val DEFAULT_CONTEXT = 1280
 
-        /** Loads [file], preferring the GPU and falling back to the CPU. Slow; call off the main thread. */
-        fun create(context: Context, file: File): MediaPipeEngine {
+        /**
+         * Loads [file] on the GPU. The CPU is used only when [allowCpu] is set
+         * (an explicit opt-in in the app); otherwise a phone without a usable
+         * GPU gets a clear error instead of a silently slow translation.
+         * Slow (seconds); call off the main thread.
+         */
+        fun create(context: Context, file: File, allowCpu: Boolean): MediaPipeEngine {
             val maxTokens = contextFromFileName(file.name) ?: DEFAULT_CONTEXT
+            val backends = buildList {
+                add(LlmInference.Backend.GPU)
+                if (allowCpu) add(LlmInference.Backend.CPU)
+            }
             var lastError: Throwable? = null
-            for (backend in listOf(LlmInference.Backend.GPU, LlmInference.Backend.CPU)) {
+            for (backend in backends) {
                 try {
                     val options = LlmInference.LlmInferenceOptions.builder()
                         .setModelPath(file.absolutePath)
@@ -120,7 +136,15 @@ class MediaPipeEngine private constructor(
                     lastError = e
                 }
             }
-            throw IllegalStateException("Could not load ${file.name}: ${lastError?.message}", lastError)
+            throw IllegalStateException(
+                if (allowCpu) {
+                    "Could not load ${file.name}: ${lastError?.message}"
+                } else {
+                    "This phone's GPU could not run ${file.name} (${lastError?.message}). " +
+                        "Turn on \"Allow CPU\" to run it on the CPU instead (much slower)."
+                },
+                lastError,
+            )
         }
     }
 }

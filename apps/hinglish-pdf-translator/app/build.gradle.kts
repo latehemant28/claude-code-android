@@ -1,10 +1,40 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.URI
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+}
+
+/**
+ * Optional: bundle the model in the APK, so the app works with no import
+ * step. `./gradlew assembleRelease -PembedModel` downloads Qwen 2.5 1.5B
+ * (Apache-2.0, ~1.6 GB) into src/main/assets once, at BUILD time; the app
+ * itself still never touches the network. The APK becomes ~1.65 GB.
+ */
+val embedModel = project.hasProperty("embedModel")
+val qwenModelUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/" +
+    "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
+val qwenAsset = layout.projectDirectory.file("src/main/assets/Qwen2.5-1.5B-Instruct_q8_ekv1280.task")
+
+val downloadQwenModel by tasks.registering {
+    description = "Downloads the Qwen 2.5 1.5B model into the app's assets (build machine only)."
+    outputs.file(qwenAsset)
+    doLast {
+        val target = qwenAsset.asFile
+        if (target.length() > 1_000_000_000L) return@doLast // already there
+        val partial = File(target.path + ".part")
+        URI(qwenModelUrl).toURL().openStream().use { input ->
+            partial.outputStream().use { input.copyTo(it, bufferSize = 1 shl 20) }
+        }
+        check(partial.renameTo(target)) { "Could not move the model into assets" }
+    }
+}
+
+if (embedModel) {
+    tasks.named("preBuild") { dependsOn(downloadQwenModel) }
 }
 
 android {
@@ -14,7 +44,7 @@ android {
     defaultConfig {
         applicationId = "com.example.hinglishpdf"
         // Android 10+: MediaStore saves to Downloads without any storage
-        // permission, and a 3B model needs a phone of that generation anyway.
+        // permission, and GPU inference needs a phone of that generation anyway.
         minSdk = 29
         targetSdk = 35
         versionCode = 1
@@ -22,13 +52,13 @@ android {
 
     }
 
-    // MediaPipe's LLM engine is a ~27 MB native library per ABI, so build one
-    // APK per ABI: arm64-v8a for real phones, x86_64 for the emulator.
+    // One APK per ABI: arm64-v8a for real phones, x86_64 for the emulator.
+    // With the model embedded only the phone APK is built (it is 1.6 GB).
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "x86_64")
+            if (embedModel) include("arm64-v8a") else include("arm64-v8a", "x86_64")
             isUniversalApk = false
         }
     }
@@ -60,7 +90,7 @@ android {
     // A bundled model must be stored uncompressed, otherwise it cannot be
     // streamed out of the APK and copying it costs twice the memory.
     androidResources {
-        noCompress += listOf("task", "bin", "tflite", "litertlm")
+        noCompress += listOf("task", "bin", "tflite")
     }
 
     packaging {
@@ -114,10 +144,7 @@ dependencies {
     // --- EPUB (XHTML) parsing and rewriting ---
     implementation("org.jsoup:jsoup:1.18.3")
 
-    // --- On-device LLM inference ---
-    // LiteRT-LM runs .litertlm models (e.g. Llama 3.2 3B Instruct);
-    // MediaPipe runs .task/.bin models (e.g. Gemma 3 1B, Qwen 2.5 1.5B).
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.18.0")
+    // --- On-device LLM inference: Qwen 2.5 1.5B on the GPU delegate ---
     implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
     // --- Tests ---
