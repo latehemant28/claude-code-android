@@ -1,5 +1,6 @@
 package com.example.hinglishpdf.data
 
+import com.example.hinglishpdf.BuildConfig
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.example.hinglishpdf.data.translate.BlockChunker
@@ -32,6 +33,9 @@ import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import kotlin.math.max
 import kotlin.math.min
+
+/** The Gemini model every chunk is sent to. */
+const val GEMINI_MODEL_NAME = "gemini-3.5-flash-lite"
 
 /** Progress of one page, streamed as it is translated. */
 sealed interface PageEvent {
@@ -75,12 +79,15 @@ fun interface HinglishModel {
     fun translate(prompt: String): Flow<String>
 }
 
-/** Google Gemini via the official Android SDK (`com.google.ai.client.generativeai`). */
-class GeminiHinglishModel(apiKey: String, private val modelName: String) : HinglishModel {
+/**
+ * Google Gemini via the official Android SDK (`com.google.ai.client.generativeai`).
+ * The API key comes from BuildConfig, which Gradle fills from local.properties.
+ */
+class GeminiHinglishModel(private val modelName: String = GEMINI_MODEL_NAME) : HinglishModel {
 
     private val model = GenerativeModel(
         modelName = modelName,
-        apiKey = apiKey,
+        apiKey = BuildConfig.GEMINI_API_KEY,
         generationConfig = generationConfig { temperature = 0.2f },
         // Books contain violence, romance, medicine... Don't let the default
         // filters refuse ordinary literature mid-book.

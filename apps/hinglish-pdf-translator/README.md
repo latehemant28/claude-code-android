@@ -31,40 +31,33 @@ writing.
 ## Setup: the Gemini API key
 
 1. Get a free key at [Google AI Studio](https://aistudio.google.com/) → **Get API key**.
-   Gemini API keys start with `AIza`.
-2. Add it to `local.properties` in this folder (next to `settings.gradle.kts`).
+   2. Add it to `local.properties` in this folder (next to `settings.gradle.kts`).
    Android Studio creates the file; it is git-ignored, so the key never reaches git:
 
    ```properties
    sdk.dir=/path/to/Android/sdk
-   GEMINI_API_KEY=AIza...your key...
-   # optional, defaults to gemini-3.5-flash-lite
-   GEMINI_MODEL=gemini-3.5-flash-lite
+   GEMINI_API_KEY=my_actual_key_here
    ```
 
-3. Rebuild. `app/build.gradle.kts` reads both values into
-   `BuildConfig.GEMINI_API_KEY` and `BuildConfig.GEMINI_MODEL`; no Kotlin file
-   contains the key. On a CI machine, the environment variables of the same
-   names work too.
+3. Rebuild. `app/build.gradle.kts` reads the key into
+   `BuildConfig.GEMINI_API_KEY`, and `GeminiHinglishModel` in
+   `TranslationRepository.kt` passes it to `GenerativeModel`. No Kotlin file
+   contains the key. A build without a key shows "This build has no Gemini API
+   key" and won't start translating.
 
-**No key in the build?** The app then shows a field to paste a key. It is
-stored only in the app's private storage on that phone. This lets one APK be
-shared without a key built in.
-
-**Keep the key private.** A key compiled into an APK (or typed into it) can be
-extracted by anyone who has that APK, so don't publish an APK with your key
-inside. If a key leaks, delete it in AI Studio and create a new one.
+**Keep the key private.** A key compiled into an APK can be extracted by
+anyone who has that APK, so don't publish an APK with your key inside. If a key
+leaks, delete it in AI Studio and create a new one.
 
 ### Which model
 
-| `GEMINI_MODEL` | Notes |
-|---|---|
-| `gemini-3.5-flash-lite` (default) | Fast, free tier, recommended by Google for new projects |
-| `gemini-3.8-flash` | Stronger, free tier, slower and lower free limits |
-
-Both had a free tier when this was written; check
-[the pricing page](https://ai.google.dev/gemini-api/docs/pricing) and your
-limits in AI Studio. `gemini-2.0-flash` has been shut down.
+The model is the `GEMINI_MODEL_NAME` constant at the top of
+[`TranslationRepository.kt`](app/src/main/java/com/example/hinglishpdf/data/TranslationRepository.kt)
+(default `gemini-3.5-flash-lite`, free tier). Retired models such as
+`gemini-1.5-flash` (shut down 29 September 2025) and `gemini-2.0-flash` answer
+"not found"; the app then stops with a message saying to change that constant.
+Check current models and free-tier limits on
+[the pricing page](https://ai.google.dev/gemini-api/docs/pricing) and in AI Studio.
 
 ## Build
 
@@ -172,7 +165,7 @@ permission on Android 10+ (this app's minimum).
 
 ```
 app/
-├── build.gradle.kts                Dependencies; GEMINI_API_KEY/GEMINI_MODEL → BuildConfig
+├── build.gradle.kts                Dependencies; GEMINI_API_KEY (local.properties) → BuildConfig
 ├── proguard-rules.pro
 └── src/main/
     ├── AndroidManifest.xml         INTERNET, foreground service (specialUse), wake lock, notifications
@@ -186,7 +179,6 @@ app/
         ├── data/
         │   ├── TranslationRepository.kt  Gemini client, pacing, retries, page translation Flow
         │   ├── llm/HinglishPrompt.kt     The system prompt (verbatim) + answer parser
-        │   ├── settings/GeminiKeyStore.kt BuildConfig key, or one pasted into the app
         │   ├── db/                       Room: books, pages (PK = bookId + pageNumber), DAOs
         │   ├── pdf/                      PDFBox extraction + layout analysis per page
         │   ├── epub/EpubBook.kt          EPUB reading and translated copy

@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
@@ -50,7 +49,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -59,9 +57,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,8 +66,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,7 +76,6 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.bulletFor
-import com.example.hinglishpdf.data.settings.GeminiKeyStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,14 +116,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "gemini") {
-                GeminiCard(
-                    configured = state.geminiConfigured,
-                    source = state.geminiKeySource,
-                    modelName = state.geminiModel,
-                    busy = state.live.running,
-                    onSaveKey = viewModel::saveApiKey,
-                    onRemoveKey = viewModel::removeApiKey,
-                )
+                GeminiCard(configured = state.geminiConfigured, modelName = state.geminiModel)
             }
 
             item(key = "new") {
@@ -208,16 +193,9 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 }
 
 @Composable
-private fun GeminiCard(
-    configured: Boolean,
-    source: GeminiKeyStore.Source,
-    modelName: String,
-    busy: Boolean,
-    onSaveKey: (String) -> Unit,
-    onRemoveKey: () -> Unit,
-) {
+private fun GeminiCard(configured: Boolean, modelName: String) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Cloud, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -230,31 +208,13 @@ private fun GeminiCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (source == GeminiKeyStore.Source.ENTERED_IN_APP) {
-                    TextButton(onClick = onRemoveKey, enabled = !busy) { Text("Remove saved API key") }
-                }
             } else {
-                var key by rememberSaveable { mutableStateOf("") }
                 Text(
-                    "Add your free API key from aistudio.google.com (Get API key). It is kept only " +
-                        "on this phone. Developers can instead build it in via local.properties.",
+                    "This build has no Gemini API key. Add GEMINI_API_KEY=… to local.properties " +
+                        "and rebuild the app.",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
                 )
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it.trim() },
-                    label = { Text("Gemini API key") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    supportingText = {
-                        if (key.isNotEmpty() && !key.startsWith("AIza")) {
-                            Text("Gemini API keys usually start with \"AIza\". Check you copied the right value.")
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(onClick = { onSaveKey(key) }, enabled = key.length >= 20) { Text("Save key") }
             }
         }
     }

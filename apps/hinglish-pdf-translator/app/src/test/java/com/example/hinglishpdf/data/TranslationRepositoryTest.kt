@@ -5,6 +5,7 @@ import com.example.hinglishpdf.data.document.DocBlock
 import com.google.ai.client.generativeai.type.InvalidAPIKeyException
 import com.google.ai.client.generativeai.type.QuotaExceededException
 import com.google.ai.client.generativeai.type.ServerException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.toList
@@ -19,6 +20,7 @@ import org.junit.Test
 import java.io.IOException
 import java.net.UnknownHostException
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TranslationRepositoryTest {
 
     /**

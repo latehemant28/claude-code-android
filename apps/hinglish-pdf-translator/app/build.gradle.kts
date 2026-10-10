@@ -9,22 +9,17 @@ plugins {
 }
 
 /**
- * The Gemini API key and model come from local.properties (git-ignored), or
- * from environment variables on a CI machine. They are compiled into
- * BuildConfig, so they never appear in the source code or in git:
+ * The Gemini API key is read from local.properties (git-ignored, never
+ * committed) and compiled into BuildConfig.GEMINI_API_KEY, so it never
+ * appears in the source code:
  *
- *   GEMINI_API_KEY=your-key-from-aistudio.google.com
- *   GEMINI_MODEL=gemini-3.5-flash-lite      (optional)
+ *   GEMINI_API_KEY=my_actual_key_here
  */
 val localProperties = Properties().apply {
-    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+    val file = rootProject.file("local.properties")
+    if (file.isFile) file.inputStream().use { load(it) }
 }
-
-fun secret(name: String, default: String = ""): String =
-    (localProperties.getProperty(name) ?: System.getenv(name) ?: default).trim()
-
-/** Escapes a value for a Java string literal in BuildConfig. */
-fun javaString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY", "").trim()
 
 android {
     namespace = "com.example.hinglishpdf"
@@ -38,8 +33,9 @@ android {
         versionCode = 2
         versionName = "2.0"
 
-        buildConfigField("String", "GEMINI_API_KEY", javaString(secret("GEMINI_API_KEY")))
-        buildConfigField("String", "GEMINI_MODEL", javaString(secret("GEMINI_MODEL", "gemini-3.5-flash-lite")))
+        // Quotes and backslashes escaped so any key is a valid Java string literal.
+        val escapedKey = geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$escapedKey\"")
     }
 
     buildTypes {

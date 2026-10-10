@@ -91,7 +91,7 @@ class TranslationService : Service() {
         try {
             showProgress(initial, "Starting…", 0, 0)
             check(app.geminiConfigured) {
-                "No Gemini API key. Add GEMINI_API_KEY to local.properties and rebuild, or paste a key in the app."
+                "No Gemini API key in this build. Add GEMINI_API_KEY to local.properties and rebuild the app."
             }
 
             // 1. Extract the pages once. Pages are stored in one transaction, so

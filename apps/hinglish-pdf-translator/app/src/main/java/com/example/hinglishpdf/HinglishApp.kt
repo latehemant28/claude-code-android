@@ -2,13 +2,11 @@ package com.example.hinglishpdf
 
 import android.app.Application
 import com.example.hinglishpdf.data.GeminiHinglishModel
-import com.example.hinglishpdf.data.HinglishModel
 import com.example.hinglishpdf.data.TranslationRepository
 import com.example.hinglishpdf.data.db.AppDatabase
 import com.example.hinglishpdf.data.document.BookImporter
 import com.example.hinglishpdf.data.export.BookExporter
 import com.example.hinglishpdf.data.pdf.PdfTextExtractor
-import com.example.hinglishpdf.data.settings.GeminiKeyStore
 import com.example.hinglishpdf.service.Notifications
 import com.example.hinglishpdf.service.TranslationMonitor
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
@@ -26,24 +24,11 @@ class HinglishApp : Application() {
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** From local.properties at build time (BuildConfig), or pasted into the app. */
-    val geminiKey by lazy { GeminiKeyStore(this) }
-    val geminiConfigured: Boolean get() = geminiKey.key.value.isNotBlank()
-    val geminiModel: String get() = BuildConfig.GEMINI_MODEL
+    /** The key comes from local.properties at build time (see app/build.gradle.kts). */
+    val geminiConfigured: Boolean get() = BuildConfig.GEMINI_API_KEY.isNotBlank()
 
     val db by lazy { AppDatabase.create(this) }
-    val translationRepository by lazy { TranslationRepository(HinglishModel { prompt -> gemini().translate(prompt) }) }
-
-    /** One Gemini client per key; recreated only if the key changes. */
-    private var geminiClient: Pair<String, GeminiHinglishModel>? = null
-
-    @Synchronized
-    private fun gemini(): GeminiHinglishModel {
-        val key = geminiKey.key.value
-        geminiClient?.let { (k, client) -> if (k == key) return client }
-        return GeminiHinglishModel(key, BuildConfig.GEMINI_MODEL).also { geminiClient = key to it }
-    }
-
+    val translationRepository by lazy { TranslationRepository(GeminiHinglishModel()) }
     val importer by lazy { BookImporter(this, PdfTextExtractor(this)) }
     val exporter by lazy { BookExporter(this, db) }
     val monitor = TranslationMonitor()

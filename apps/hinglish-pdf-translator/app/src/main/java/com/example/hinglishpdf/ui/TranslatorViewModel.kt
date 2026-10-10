@@ -11,7 +11,7 @@ import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
-import com.example.hinglishpdf.data.settings.GeminiKeyStore
+import com.example.hinglishpdf.data.GEMINI_MODEL_NAME
 import com.example.hinglishpdf.service.LiveStatus
 import com.example.hinglishpdf.service.TranslationService
 import kotlinx.coroutines.CancellationException
@@ -33,10 +33,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class TranslatorUiState(
-    /** False until a Gemini API key is available (BuildConfig or pasted in the app). */
+    /** False when the app was built without GEMINI_API_KEY in local.properties. */
     val geminiConfigured: Boolean = false,
-    val geminiKeySource: GeminiKeyStore.Source = GeminiKeyStore.Source.NONE,
-    val geminiModel: String = "",
+    val geminiModel: String = GEMINI_MODEL_NAME,
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
@@ -85,24 +84,23 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     private val local = MutableStateFlow(LocalState())
 
     val state: StateFlow<TranslatorUiState> = combine(
-        app.geminiKey.key,
         app.db.bookDao().observeAll(),
         // Only the coarse status here; the per-token text has its own flow below.
         app.monitor.status.map { it.copy(liveText = "", pageTranslations = emptyList()) }.distinctUntilChanged(),
         local,
-    ) { key, books, live, l ->
+    ) { books, live, l ->
         TranslatorUiState(
-            key.isNotBlank(), app.geminiKey.source, app.geminiModel,
-            books, l.selectedBookId, live, l.importing, l.message,
+            geminiConfigured = app.geminiConfigured,
+            books = books,
+            selectedBookId = l.selectedBookId,
+            live = live,
+            importing = l.importing,
+            message = l.message,
         )
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        TranslatorUiState(
-            geminiConfigured = app.geminiConfigured,
-            geminiKeySource = app.geminiKey.source,
-            geminiModel = app.geminiModel,
-        ),
+        TranslatorUiState(geminiConfigured = app.geminiConfigured),
     )
 
     /**
@@ -136,14 +134,6 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     }
 
     fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
-
-    /** Stores a pasted key on this phone (only used when the build has none). */
-    fun saveApiKey(key: String) {
-        app.geminiKey.save(key)
-        showMessage("API key saved on this phone")
-    }
-
-    fun removeApiKey() = app.geminiKey.clear()
 
     /** Adds the picked book to the queue and starts the background service. */
     fun addBook(uri: Uri) {
