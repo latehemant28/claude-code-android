@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.update
 data class LiveStatus(
     val running: Boolean = false,
     val bookId: Long? = null,
-    /** "Translating page 45 of 300...", "Cooling down...", ... */
+    /** "Translating page 45 of 300...", "Gemini rate limit reached: retrying in 30 s", ... */
     val label: String = "",
     val page: Int = 0,
     /** Micro-chunk in progress within the page, e.g. 2 of 4. */
@@ -20,7 +20,8 @@ data class LiveStatus(
     val pageTranslations: List<String?> = emptyList(),
     /** Raw model output for the micro-chunk being generated right now. */
     val liveText: String = "",
-    val coolingDown: Boolean = false,
+    /** Waiting out a Gemini rate limit or a dropped connection. */
+    val waiting: Boolean = false,
 )
 
 /** Shared between the service (writer) and the screen (reader); same process. */

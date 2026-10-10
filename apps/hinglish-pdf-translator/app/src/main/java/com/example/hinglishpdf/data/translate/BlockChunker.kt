@@ -5,8 +5,8 @@ import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.text.TextChunker
 
 /**
- * One block of a micro-chunk: a whole block, or one piece of a block that was
- * too long for one chunk ([continuation] pieces carry no marker of their own).
+ * One block of a chunk: a whole block, or one piece of a block that was too
+ * long for one chunk ([continuation] pieces carry no marker of their own).
  */
 data class TranslationUnit(
     val blockIndex: Int,
@@ -18,24 +18,24 @@ data class TranslationUnit(
 )
 
 /**
- * Cuts ONE page into micro-chunks of 100-150 words before they reach the
- * model, without ever breaking a block's structure: whole blocks are packed
- * while they fit, and only a block longer than the limit is split, at
- * sentence boundaries. Small chunks keep the prompt short (fast prefill, low
- * memory, well inside a 1280-token model) and give a 1.5B model less to keep
- * track of. The translations are stitched back per block afterwards.
+ * Cuts ONE page into chunks for Gemini without ever breaking a block's
+ * structure: whole blocks are packed while they fit, and only a block longer
+ * than the limit is split, at sentence boundaries.
+ *
+ * The free Gemini tier limits requests per minute and per day, not text size,
+ * so chunks are large: a normal book page is a single request.
  */
 object BlockChunker {
 
-    /** Upper bound of a micro-chunk; greedy packing lands most chunks at 100-150 words. */
-    const val MICRO_CHUNK_WORDS = 150
+    /** Words per request; a dense printed page is 400-600 words. */
+    const val CHUNK_WORDS = 800
 
-    /** Few blocks per chunk, so the answer can be matched back reliably. */
-    const val MAX_BLOCKS_PER_CHUNK = 8
+    /** Blocks per request, so the answer can be matched back reliably. */
+    const val MAX_BLOCKS_PER_CHUNK = 40
 
     fun chunk(
         blocks: List<DocBlock>,
-        maxWords: Int = MICRO_CHUNK_WORDS,
+        maxWords: Int = CHUNK_WORDS,
         maxLines: Int = MAX_BLOCKS_PER_CHUNK,
     ): List<List<TranslationUnit>> {
         require(maxWords > 0 && maxLines > 0)

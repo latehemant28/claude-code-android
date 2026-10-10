@@ -20,28 +20,26 @@ class HinglishPromptTest {
         unit(BlockKind.NUMBERED, "Save the file", marker = "3."),
     )
 
-    /** The system prompt exactly as specified, with the micro-chunk in place of the placeholder. */
-    private val specified = """You are an expert at translating English to natural, modern conversational Hinglish (Hindi written in Roman script). 
+    /** The system prompt exactly as specified, with the chunk in place of the placeholder. */
+    private val specified = """You are a highly accurate English to Hinglish translator. You only translate the text inside the <input> tags. Do not repeat the examples. 
 
-CORE RULES:
-- Do NOT use highly formal or pure Hindi words (like 'samavesh', 'vyatirikta', 'prabhavshali').
-- Keep it casual, modern, and easy to read, exactly like a WhatsApp chat between modern urban Indians.
-- Keep English words for technical terms, concepts, verbs, or common objects (e.g., 'discussion', 'points', 'exception', 'philosophy', 'system', 'optimize').
-- Strictly preserve the original document's formatting, paragraphs, and bullet points.
-- Output ONLY the translated text without any extra conversational filler.
+<rules>
+1. Translate to natural, modern Hinglish (Hindi in Roman script).
+2. Keep it casual like a WhatsApp chat between modern urban Indians.
+3. Keep English words for technical terms, concepts, verbs, or common objects (e.g., 'discussion', 'trauma', 'system').
+4. Never use pure Hindi/Devanagari words like 'samavesh' or 'vyatirikta'.
+5. Output ONLY the final translation. Do not add any extra text or repeat the prompt.
+</rules>
 
-MODERN HINGLISH EXAMPLES:
-English: First, we need to plan the discussion points. You believe people can change.
-Hinglish: Pehle, hume discussion ke points plan karne honge. Aapko lagta hai ki log badal sakte hain.
+<examples>
+English: Let's catch up later to finalize the project details.
+Hinglish: Baad mein catch up karte hain taaki project details finalize kar sakein.
+</examples>
 
-English: The system architecture is quite complex, but we can optimize the database queries easily.
-Hinglish: System architecture thoda complex hai, lekin hum database queries ko easily optimize kar sakte hain.
-
-English: Let's catch up later to finalize the project details and fix the bugs.
-Hinglish: Baad mein catch up karte hain taaki project details finalize kar sakein aur bugs fix kar dein.
-
-Translate this text in the exact same casual style:
-[INSERT MICRO-CHUNK HERE]"""
+Translate the following text:
+<input>
+[INSERT TEXT CHUNK HERE]
+</input>"""
 
     @Test
     fun `system prompt is embedded exactly`() {
@@ -49,9 +47,9 @@ Translate this text in the exact same casual style:
     }
 
     @Test
-    fun `micro-chunk goes in as markdown with the original structure`() {
+    fun `chunk goes in as markdown with the original structure`() {
         val chunk = "## Getting started\n\nFirst, we need to plan.\n\n- Open the app\n\n  - Tap settings\n\n3. Save the file"
-        assertEquals(specified.replace("[INSERT MICRO-CHUNK HERE]", chunk), HinglishPrompt.build(units))
+        assertEquals(specified.replace("[INSERT TEXT CHUNK HERE]", chunk), HinglishPrompt.build(units))
     }
 
     @Test
@@ -65,6 +63,15 @@ Translate this text in the exact same casual style:
               * Settings pe tap karo
             3. File save kar do
         """.trimIndent()
+        assertEquals(
+            listOf("Shuru karte hain", "Pehle, hume plan karna hoga.", "App open karo", "Settings pe tap karo", "File save kar do"),
+            HinglishPrompt.parse(raw, units),
+        )
+    }
+
+    @Test
+    fun `echoed input tags and a code fence are removed`() {
+        val raw = "```\n<input>\n## Shuru karte hain\n\nPehle, hume plan karna hoga.\n\n- App open karo\n\n  - Settings pe tap karo\n\n3. File save kar do\n</input>\n```"
         assertEquals(
             listOf("Shuru karte hain", "Pehle, hume plan karna hoga.", "App open karo", "Settings pe tap karo", "File save kar do"),
             HinglishPrompt.parse(raw, units),

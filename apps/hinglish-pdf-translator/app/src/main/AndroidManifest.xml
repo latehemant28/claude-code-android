@@ -1,14 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!--
-        100% offline: INTERNET is removed explicitly so no library can merge
-        it in. The model, the book and the translation never leave the phone.
-    -->
-    <uses-permission
-        android:name="android.permission.INTERNET"
-        tools:node="remove" />
+    <!-- Each chunk of text is translated by the Google Gemini API. -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Translation keeps running with the screen locked or the app in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -35,21 +29,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.HinglishPdf">
 
-        <!--
-            Lets the AI runtimes use the GPU via OpenCL on devices that ship it
-            (required for apps targeting Android 12+). Optional, so devices
-            without it fall back to CPU.
-        -->
-        <uses-native-library
-            android:name="libOpenCL.so"
-            android:required="false" />
-        <uses-native-library
-            android:name="libOpenCL-car.so"
-            android:required="false" />
-        <uses-native-library
-            android:name="libOpenCL-pixel.so"
-            android:required="false" />
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -62,9 +41,9 @@
         </activity>
 
         <!--
-            Long-running on-device AI work fits none of the predefined
-            foreground service types (dataSync and mediaProcessing are capped
-            at 6 hours a day on Android 15), so it is declared as specialUse.
+            A whole book can take hours (the free Gemini tier is rate-limited),
+            longer than dataSync allows on Android 15 (6 hours a day), so the
+            service is declared as specialUse.
         -->
         <service
             android:name=".service.TranslationService"
@@ -72,7 +51,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Translates a user-selected book page by page with an on-device AI model" />
+                android:value="Translates a user-selected book page by page with the Gemini API" />
         </service>
     </application>
 

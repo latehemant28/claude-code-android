@@ -11,7 +11,7 @@ import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
-import com.example.hinglishpdf.data.llm.ModelStatus
+import com.example.hinglishpdf.data.settings.GeminiKeyStore
 import com.example.hinglishpdf.service.LiveStatus
 import com.example.hinglishpdf.service.TranslationService
 import kotlinx.coroutines.CancellationException
@@ -33,7 +33,10 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class TranslatorUiState(
-    val model: ModelStatus = ModelStatus.Preparing("Looking for a model…"),
+    /** False until a Gemini API key is available (BuildConfig or pasted in the app). */
+    val geminiConfigured: Boolean = false,
+    val geminiKeySource: GeminiKeyStore.Source = GeminiKeyStore.Source.NONE,
+    val geminiModel: String = "",
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
@@ -44,7 +47,7 @@ data class TranslatorUiState(
     val selected: BookWithProgress?
         get() = books.firstOrNull { it.book.id == selectedBookId } ?: books.firstOrNull()
 
-    val canAddBook: Boolean get() = model is ModelStatus.Ready && !importing
+    val canAddBook: Boolean get() = geminiConfigured && !importing
 
     fun isRunning(book: BookEntity) = live.running && live.bookId == book.id
 }
@@ -56,7 +59,7 @@ data class LivePage(
     val chunkCount: Int,
     /** Finished blocks of this page, with their structure. */
     val blocks: List<Pair<com.example.hinglishpdf.data.document.DocBlock, String>>,
-    /** The micro-chunk being written right now (Markdown as the model writes it). */
+    /** The chunk being written right now (Markdown, as Gemini streams it). */
     val streaming: String,
 ) {
     companion object {
@@ -82,19 +85,30 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     private val local = MutableStateFlow(LocalState())
 
     val state: StateFlow<TranslatorUiState> = combine(
-        app.modelController.status,
+        app.geminiKey.key,
         app.db.bookDao().observeAll(),
         // Only the coarse status here; the per-token text has its own flow below.
         app.monitor.status.map { it.copy(liveText = "", pageTranslations = emptyList()) }.distinctUntilChanged(),
         local,
-    ) { model, books, live, l ->
-        TranslatorUiState(model, books, l.selectedBookId, live, l.importing, l.message)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TranslatorUiState())
+    ) { key, books, live, l ->
+        TranslatorUiState(
+            key.isNotBlank(), app.geminiKey.source, app.geminiModel,
+            books, l.selectedBookId, live, l.importing, l.message,
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        TranslatorUiState(
+            geminiConfigured = app.geminiConfigured,
+            geminiKeySource = app.geminiKey.source,
+            geminiModel = app.geminiModel,
+        ),
+    )
 
     /**
-     * The page being translated, streamed micro-chunk by micro-chunk. The
+     * The page being translated, streamed chunk by chunk from Gemini. The
      * text is prepared on Dispatchers.Default (conflated, so a slow frame
-     * never backs up the model) and delivered to Compose on the main thread
+     * never backs up the stream) and delivered to Compose on the main thread
      * through viewModelScope.
      */
     val livePage: StateFlow<LivePage?> = app.monitor.status
@@ -111,10 +125,11 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
-        app.modelController.refresh()
         // After a crash, a force-stop or a reboot: pick up where we stopped.
         viewModelScope.launch {
-            if (!app.monitor.status.value.running && app.db.bookDao().nextResumable() != null) {
+            if (app.geminiConfigured && !app.monitor.status.value.running &&
+                app.db.bookDao().nextResumable() != null
+            ) {
                 TranslationService.start(app)
             }
         }
@@ -122,9 +137,13 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
     fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
 
-    fun importModel(uri: Uri) = app.modelController.refresh(uri)
+    /** Stores a pasted key on this phone (only used when the build has none). */
+    fun saveApiKey(key: String) {
+        app.geminiKey.save(key)
+        showMessage("API key saved on this phone")
+    }
 
-    fun rescanModel() = app.modelController.refresh()
+    fun removeApiKey() = app.geminiKey.clear()
 
     /** Adds the picked book to the queue and starts the background service. */
     fun addBook(uri: Uri) {

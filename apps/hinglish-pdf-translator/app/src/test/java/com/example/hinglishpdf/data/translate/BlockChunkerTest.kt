@@ -49,14 +49,17 @@ class BlockChunkerTest {
     }
 
     @Test
-    fun `a page is cut into micro-chunks of at most 150 words and 8 blocks`() {
+    fun `a normal page is one chunk, a huge one is split at block boundaries`() {
         val page = (1..12).map { DocBlock(BlockKind.PARAGRAPH, words(45, "p$it") + ".") } // 540 words
-        val chunks = BlockChunker.chunk(page)
-        assertEquals(listOf(3, 3, 3, 3), chunks.map { it.size }) // 135 words each
-        assertTrue(chunks.all { c -> c.sumOf { TextChunker.countWords(it.text) } in 100..150 })
+        assertEquals(listOf(12), BlockChunker.chunk(page).map { it.size })
 
-        val bullets = (1..20).map { DocBlock(BlockKind.BULLET, "item $it") }
-        assertEquals(listOf(8, 8, 4), BlockChunker.chunk(bullets).map { it.size })
+        val huge = (1..30).map { DocBlock(BlockKind.PARAGRAPH, words(45, "h$it") + ".") } // 1350 words
+        val chunks = BlockChunker.chunk(huge)
+        assertEquals(listOf(17, 13), chunks.map { it.size })
+        assertTrue(chunks.all { c -> c.sumOf { TextChunker.countWords(it.text) } <= BlockChunker.CHUNK_WORDS })
+
+        val bullets = (1..100).map { DocBlock(BlockKind.BULLET, "item $it") }
+        assertEquals(listOf(40, 40, 20), BlockChunker.chunk(bullets).map { it.size })
     }
 
     @Test

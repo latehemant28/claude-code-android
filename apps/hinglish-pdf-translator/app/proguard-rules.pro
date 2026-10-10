@@ -17,3 +17,9 @@
 # reflectively: keep the stored model classes intact.
 -keep class com.example.hinglishpdf.data.document.DocBlock { *; }
 -keep enum com.example.hinglishpdf.data.document.BlockKind { *; }
+
+# Gemini SDK: its request/response classes are (de)serialised with
+# kotlinx.serialization; keep them so R8 cannot rename or strip them.
+-keep class com.google.ai.client.generativeai.common.** { *; }
+-keep class com.google.ai.client.generativeai.type.** { *; }
+-dontwarn org.slf4j.**

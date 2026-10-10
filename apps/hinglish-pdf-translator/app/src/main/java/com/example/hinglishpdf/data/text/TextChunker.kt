@@ -2,7 +2,7 @@ package com.example.hinglishpdf.data.text
 
 /**
  * Word counting and sentence-aware splitting of text into pieces small enough
- * for an on-device LLM (see BlockChunker for the 100-150 word micro-chunks).
+ * for a translation request (see BlockChunker for how pages are chunked).
  *
  * Chunks follow natural boundaries where possible, in this order:
  *  1. whole paragraphs are packed together while they fit,

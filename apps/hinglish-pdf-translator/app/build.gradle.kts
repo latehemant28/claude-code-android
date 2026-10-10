@@ -1,5 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import java.net.URI
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -9,36 +9,22 @@ plugins {
 }
 
 /**
- * Optional: bundle the model in the APK, so the app works with no import
- * step. `./gradlew assembleRelease -PembedModel` downloads Qwen 2.5 1.5B
- * (Apache-2.0, ~1.6 GB) once, at BUILD time, into build/qwenModel/, and adds
- * that folder to the APK's assets for this build only; the app itself still
- * never touches the network. The APK becomes ~1.6 GB.
+ * The Gemini API key and model come from local.properties (git-ignored), or
+ * from environment variables on a CI machine. They are compiled into
+ * BuildConfig, so they never appear in the source code or in git:
+ *
+ *   GEMINI_API_KEY=your-key-from-aistudio.google.com
+ *   GEMINI_MODEL=gemini-3.5-flash-lite      (optional)
  */
-val embedModel = project.hasProperty("embedModel")
-val qwenModelUrl = "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/" +
-    "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task"
-val qwenAssetsDir = layout.buildDirectory.dir("qwenModel/assets")
-val qwenAsset = qwenAssetsDir.map { it.file("Qwen2.5-1.5B-Instruct_q8_ekv1280.task") }
-
-val downloadQwenModel by tasks.registering {
-    description = "Downloads the Qwen 2.5 1.5B model into the app's assets (build machine only)."
-    outputs.file(qwenAsset)
-    doLast {
-        val target = qwenAsset.get().asFile
-        if (target.length() > 1_000_000_000L) return@doLast // already there
-        target.parentFile.mkdirs()
-        val partial = File(target.path + ".part")
-        URI(qwenModelUrl).toURL().openStream().use { input ->
-            partial.outputStream().use { input.copyTo(it, bufferSize = 1 shl 20) }
-        }
-        check(partial.renameTo(target)) { "Could not move the model into assets" }
-    }
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
 }
 
-if (embedModel) {
-    tasks.named("preBuild") { dependsOn(downloadQwenModel) }
-}
+fun secret(name: String, default: String = ""): String =
+    (localProperties.getProperty(name) ?: System.getenv(name) ?: default).trim()
+
+/** Escapes a value for a Java string literal in BuildConfig. */
+fun javaString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "com.example.hinglishpdf"
@@ -46,24 +32,14 @@ android {
 
     defaultConfig {
         applicationId = "com.example.hinglishpdf"
-        // Android 10+: MediaStore saves to Downloads without any storage
-        // permission, and GPU inference needs a phone of that generation anyway.
+        // Android 10+: MediaStore saves to Downloads without any storage permission.
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
 
-    }
-
-    // One APK per ABI: arm64-v8a for real phones, x86_64 for the emulator.
-    // With the model embedded only the phone APK is built (it is 1.6 GB).
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            if (embedModel) include("arm64-v8a") else include("arm64-v8a", "x86_64")
-            isUniversalApk = false
-        }
+        buildConfigField("String", "GEMINI_API_KEY", javaString(secret("GEMINI_API_KEY")))
+        buildConfigField("String", "GEMINI_MODEL", javaString(secret("GEMINI_MODEL", "gemini-3.5-flash-lite")))
     }
 
     buildTypes {
@@ -88,24 +64,10 @@ android {
 
     buildFeatures {
         compose = true
-    }
-
-    // A bundled model must be stored uncompressed, otherwise it cannot be
-    // streamed out of the APK and copying it costs twice the memory.
-    androidResources {
-        noCompress += listOf("task", "bin", "tflite")
-    }
-
-    if (embedModel) {
-        sourceSets["main"].assets.srcDir(qwenAssetsDir)
+        buildConfig = true
     }
 
     packaging {
-        // Compress the native libraries in the APK (roughly halves the download);
-        // Android extracts them once at install time.
-        jniLibs {
-            useLegacyPackaging = true
-        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             // Post-quantum crypto tables pulled in via PDFBox's BouncyCastle
@@ -151,8 +113,8 @@ dependencies {
     // --- EPUB (XHTML) parsing and rewriting ---
     implementation("org.jsoup:jsoup:1.18.3")
 
-    // --- On-device LLM inference: Qwen 2.5 1.5B on the GPU delegate ---
-    implementation("com.google.mediapipe:tasks-genai:0.10.35")
+    // --- Translation: Google Gemini API (cloud) ---
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
     // --- Tests ---
     testImplementation("junit:junit:4.13.2")

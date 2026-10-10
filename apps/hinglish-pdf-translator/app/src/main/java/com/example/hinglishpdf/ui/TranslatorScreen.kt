@@ -27,12 +27,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -50,6 +50,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -58,16 +59,20 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,16 +83,7 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.bulletFor
-import com.example.hinglishpdf.data.llm.ModelStatus
-
-/**
- * Qwen 2.5 1.5B Instruct, int8, 1280-token KV cache (~1.6 GB, Apache-2.0):
- * the fastest variant on the GPU, and micro-chunks never need more context.
- * Opened in the browser, so the app itself never needs internet.
- */
-private const val QWEN_DOWNLOAD_URL =
-    "https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct/resolve/main/" +
-        "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv1280.task?download=true"
+import com.example.hinglishpdf.data.settings.GeminiKeyStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,15 +94,11 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     val livePage by viewModel.livePage.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
-    val uriHandler = LocalUriHandler.current
     val context = LocalContext.current
 
     // Storage Access Framework pickers: no storage permission required.
     val bookPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::addBook)
-    }
-    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(viewModel::importModel)
     }
 
     // Android 13+: ask once so "Translating page 45 of 300..." can be shown.
@@ -123,7 +115,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     }
 
     Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text("Book → Hinglish / Minglish") }) },
+        topBar = { CenterAlignedTopAppBar(title = { Text("Book → Hinglish") }) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
@@ -131,19 +123,14 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(key = "model") {
-                ModelCard(
-                    status = state.model,
-                    canChange = state.model !is ModelStatus.Preparing && !state.live.running,
-                    onImport = { modelPicker.launch(arrayOf("*/*")) },
-                    onRescan = viewModel::rescanModel,
-                    onDownload = {
-                        try {
-                            uriHandler.openUri(QWEN_DOWNLOAD_URL)
-                        } catch (e: Exception) {
-                            viewModel.showMessage("No browser found to download the model")
-                        }
-                    },
+            item(key = "gemini") {
+                GeminiCard(
+                    configured = state.geminiConfigured,
+                    source = state.geminiKeySource,
+                    modelName = state.geminiModel,
+                    busy = state.live.running,
+                    onSaveKey = viewModel::saveApiKey,
+                    onRemoveKey = viewModel::removeApiKey,
                 )
             }
 
@@ -220,61 +207,54 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModelCard(
-    status: ModelStatus,
-    canChange: Boolean,
-    onImport: () -> Unit,
-    onRescan: () -> Unit,
-    onDownload: () -> Unit,
+private fun GeminiCard(
+    configured: Boolean,
+    source: GeminiKeyStore.Source,
+    modelName: String,
+    busy: Boolean,
+    onSaveKey: (String) -> Unit,
+    onRemoveKey: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Memory, contentDescription = null)
+                Icon(Icons.Filled.Cloud, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Qwen 2.5 1.5B · on-device", style = MaterialTheme.typography.titleSmall)
+                Text("Google Gemini · $modelName", style = MaterialTheme.typography.titleSmall)
             }
-            when (status) {
-                is ModelStatus.Preparing -> {
-                    Text(status.message, style = MaterialTheme.typography.bodyMedium)
-                    val progress = status.progress
-                    if (progress != null) {
-                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                    } else {
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                    }
-                }
-                is ModelStatus.Ready -> Text(
-                    "Ready on the ${status.backend} · temperature 0.2 · offline",
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            if (configured) {
+                Text(
+                    "Ready. Needs an internet connection. Each page's text is sent to Google " +
+                        "to be translated; on the free tier Google may use it to improve its products.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                ModelStatus.Missing -> Text(
-                    "No model yet. Tap Download Qwen (1.6 GB, opens your browser, one time only), " +
-                        "then Import model and pick the downloaded .task file.",
+                if (source == GeminiKeyStore.Source.ENTERED_IN_APP) {
+                    TextButton(onClick = onRemoveKey, enabled = !busy) { Text("Remove saved API key") }
+                }
+            } else {
+                var key by rememberSaveable { mutableStateOf("") }
+                Text(
+                    "Add your free API key from aistudio.google.com (Get API key). It is kept only " +
+                        "on this phone. Developers can instead build it in via local.properties.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                is ModelStatus.Failed -> Text(
-                    status.message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it.trim() },
+                    label = { Text("Gemini API key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = {
+                        if (key.isNotEmpty() && !key.startsWith("AIza")) {
+                            Text("Gemini API keys usually start with \"AIza\". Check you copied the right value.")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (status !is ModelStatus.Ready) {
-                    TextButton(onClick = onDownload) {
-                        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Download Qwen")
-                    }
-                }
-                TextButton(onClick = onImport, enabled = canChange) { Text("Import model") }
-                if (status is ModelStatus.Missing || status is ModelStatus.Failed) {
-                    TextButton(onClick = onRescan, enabled = canChange) { Text("Rescan") }
-                }
+                Button(onClick = { onSaveKey(key) }, enabled = key.length >= 20) { Text("Save key") }
             }
         }
     }
@@ -389,15 +369,15 @@ private fun BookCard(
     }
 }
 
-/** The page in progress: finished blocks with their structure, then the micro-chunk being written. */
+/** The page in progress: finished blocks with their structure, then the chunk being written. */
 @Composable
 private fun LiveCard(label: String, live: LivePage, unit: String) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(label, style = MaterialTheme.typography.labelLarge)
-            if (live.chunkCount > 0) {
+            if (live.chunkCount > 1) {
                 Text(
-                    "$unit ${live.page} · micro-chunk ${live.chunk} of ${live.chunkCount}",
+                    "$unit ${live.page} · part ${live.chunk} of ${live.chunkCount}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )

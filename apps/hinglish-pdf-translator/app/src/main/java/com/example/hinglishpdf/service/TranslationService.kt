@@ -14,7 +14,7 @@ import com.example.hinglishpdf.HinglishApp
 import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.document.DocumentFormatter
-import com.example.hinglishpdf.data.translate.PageEvent
+import com.example.hinglishpdf.data.PageEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,10 +87,12 @@ class TranslationService : Service() {
         val books = app.db.bookDao()
         val pages = app.db.pageDao()
         val id = initial.id
-        app.monitor.update { LiveStatus(running = true, bookId = id, label = "Loading the AI model…") }
+        app.monitor.update { LiveStatus(running = true, bookId = id, label = "Starting…") }
         try {
-            showProgress(initial, "Loading the AI model…", 0, 0)
-            app.modelController.ensureLoaded()
+            showProgress(initial, "Starting…", 0, 0)
+            check(app.geminiConfigured) {
+                "No Gemini API key. Add GEMINI_API_KEY to local.properties and rebuild, or paste a key in the app."
+            }
 
             // 1. Extract the pages once. Pages are stored in one transaction, so
             // an interrupted extraction leaves none and is simply redone; a
@@ -113,8 +115,7 @@ class TranslationService : Service() {
             val book = books.get(id) ?: return
             val unit = book.unitName
 
-            // 2. Translate page by page, saving each page immediately.
-            var pagesThisRun = 0
+            // 2. Translate page by page with Gemini, saving each page immediately.
             while (true) {
                 val page = pages.nextUntranslated(id) ?: break
                 val label = "Translating $unit ${page.pageNumber} of ${book.pageCount}..."
@@ -122,14 +123,14 @@ class TranslationService : Service() {
                     it.copy(
                         label = label, page = page.pageNumber, chunk = 0, chunkCount = 0,
                         pageBlocks = page.sourceBlocks, pageTranslations = emptyList(),
-                        liveText = "", coolingDown = false,
+                        liveText = "", waiting = false,
                     )
                 }
                 showProgress(book, label, page.pageNumber - 1, book.pageCount)
 
-                // Micro-chunks of the page stream in; the page is saved only once complete.
+                // Gemini's answer streams in; the page is saved only once complete.
                 var translations: List<String?> = emptyList()
-                app.pageTranslator.translatePage(page.sourceBlocks).collect { event ->
+                app.translationRepository.translatePage(page.sourceBlocks).collect { event ->
                     when (event) {
                         is PageEvent.ChunkStarted -> {
                             app.monitor.update {
@@ -139,9 +140,16 @@ class TranslationService : Service() {
                                 showProgress(book, "$label (part ${event.chunk}/${event.chunkCount})", page.pageNumber - 1, book.pageCount)
                             }
                         }
-                        is PageEvent.Token -> app.monitor.update { it.copy(liveText = it.liveText + event.text) }
+                        is PageEvent.Token -> app.monitor.update {
+                            it.copy(label = label, waiting = false, liveText = it.liveText + event.text)
+                        }
+                        is PageEvent.Waiting -> {
+                            val message = "${event.reason}: retrying in ${event.seconds} s"
+                            app.monitor.update { it.copy(label = message, liveText = "", waiting = true) }
+                            showProgress(book, message, page.pageNumber - 1, book.pageCount)
+                        }
                         is PageEvent.ChunkFinished -> app.monitor.update {
-                            it.copy(pageTranslations = event.translations, liveText = "")
+                            it.copy(label = label, pageTranslations = event.translations, liveText = "", waiting = false)
                         }
                         is PageEvent.PageFinished -> translations = event.translations
                     }
@@ -153,19 +161,10 @@ class TranslationService : Service() {
                     text = DocumentFormatter.toPlainText(page.sourceBlocks, translations),
                     at = System.currentTimeMillis(),
                 )
-                pagesThisRun++
-
-                // 3. Let the phone cool down now and then.
-                app.thermal.afterPage(pagesThisRun) { message ->
-                    app.monitor.update {
-                        it.copy(label = message, liveText = "", pageBlocks = emptyList(), coolingDown = true)
-                    }
-                    showProgress(book, message, page.pageNumber, book.pageCount)
-                }
             }
 
-            // 4. Build the new PDF/EPUB and save it to Downloads.
-            app.monitor.update { it.copy(label = "Saving to Downloads…", liveText = "", coolingDown = false) }
+            // 3. Build the new PDF/EPUB and save it to Downloads.
+            app.monitor.update { it.copy(label = "Saving to Downloads…", liveText = "", waiting = false) }
             showProgress(book, "Saving to Downloads…", book.pageCount, book.pageCount)
             val saved = app.exporter.exportToDownloads(book)
             books.setStatus(id, BookStatus.COMPLETED)
