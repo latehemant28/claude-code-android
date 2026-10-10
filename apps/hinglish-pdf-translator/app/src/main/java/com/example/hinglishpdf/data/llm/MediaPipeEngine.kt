@@ -110,41 +110,30 @@ class MediaPipeEngine private constructor(
         private const val DEFAULT_CONTEXT = 1280
 
         /**
-         * Loads [file] on the GPU. The CPU is used only when [allowCpu] is set
-         * (an explicit opt-in in the app); otherwise a phone without a usable
-         * GPU gets a clear error instead of a silently slow translation.
+         * Loads [file] on the GPU, and only on the GPU: the backend is fixed to
+         * [LlmInference.Backend.GPU] (MediaPipe's OpenCL LLM engine) and there is
+         * no CPU path. A phone whose GPU cannot run the model gets a clear error.
          * Slow (seconds); call off the main thread.
          */
-        fun create(context: Context, file: File, allowCpu: Boolean): MediaPipeEngine {
+        fun create(context: Context, file: File): MediaPipeEngine {
             val maxTokens = contextFromFileName(file.name) ?: DEFAULT_CONTEXT
-            val backends = buildList {
-                add(LlmInference.Backend.GPU)
-                if (allowCpu) add(LlmInference.Backend.CPU)
+            val options = LlmInference.LlmInferenceOptions.builder()
+                .setModelPath(file.absolutePath)
+                .setMaxTokens(maxTokens)
+                .setMaxTopK(TOP_K)
+                .setPreferredBackend(LlmInference.Backend.GPU)
+                .build()
+            return try {
+                MediaPipeEngine(LlmInference.createFromOptions(context, options), "GPU", maxTokens)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not load ${file.name} on the GPU", e)
+                throw IllegalStateException(
+                    "This phone's GPU could not run ${file.name} (${e.message}). " +
+                        "The app runs the model on the GPU only, so it needs a phone with OpenCL GPU " +
+                        "support (most recent Snapdragon, Dimensity and Exynos phones).",
+                    e,
+                )
             }
-            var lastError: Throwable? = null
-            for (backend in backends) {
-                try {
-                    val options = LlmInference.LlmInferenceOptions.builder()
-                        .setModelPath(file.absolutePath)
-                        .setMaxTokens(maxTokens)
-                        .setMaxTopK(TOP_K)
-                        .setPreferredBackend(backend)
-                        .build()
-                    return MediaPipeEngine(LlmInference.createFromOptions(context, options), backend.name, maxTokens)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not load ${file.name} on $backend", e)
-                    lastError = e
-                }
-            }
-            throw IllegalStateException(
-                if (allowCpu) {
-                    "Could not load ${file.name}: ${lastError?.message}"
-                } else {
-                    "This phone's GPU could not run ${file.name} (${lastError?.message}). " +
-                        "Turn on \"Allow CPU\" to run it on the CPU instead (much slower)."
-                },
-                lastError,
-            )
         }
     }
 }

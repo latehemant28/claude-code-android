@@ -9,8 +9,8 @@ with **Qwen 2.5 1.5B Instruct** running on the phone's **GPU**.
   together, so page N of the output is page N of the original.
 - **Structure kept:** headings, bullet points (with nesting), numbering and
   paragraph breaks are detected on every page and restored after translation.
-- **GPU inference:** MediaPipe's GPU delegate (OpenCL), temperature 0.2. The
-  CPU is never used unless you switch it on yourself.
+- **GPU only:** the model runs on MediaPipe's OpenCL GPU engine at
+  temperature 0.2. There is no CPU path and no CPU fallback.
 - **Background:** a foreground service with a persistent "Translating page 45
   of 300..." notification keeps running with the screen locked.
 - **Crash-proof:** every page is saved to Room the moment it is done; after a
@@ -42,9 +42,17 @@ toolchain, and Qualcomm's own Qwen 2.5 page is marked deprecated. Google's
 NPU builds exist only for Gemma on Pixel's Tensor chip. The GPU delegate is
 the fastest accelerator available for Qwen today.
 
-**No silent CPU fallback:** if the GPU cannot load the model, the app shows
-an error and an **Allow CPU** switch (off by default) instead of quietly
-running slowly.
+**GPU only, no CPU fallback:** the backend is fixed to
+`LlmInference.Backend.GPU` in
+[`MediaPipeEngine.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/MediaPipeEngine.kt),
+and the app has no CPU option. MediaPipe hands that setting straight to its
+native OpenCL LLM engine, which reports "OpenCL is not supported" rather than
+switching to the CPU. If a phone's GPU can't run the model, the app shows that
+error and does not translate.
+
+The CPU still does the small jobs around the model that every app needs:
+reading the PDF, turning text into tokens, the database and the screen. The
+model's work (all of the matrix math for every word) runs on the GPU.
 
 ### Getting the model onto the phone
 
@@ -113,7 +121,7 @@ app/
         │       ├── HinglishPrompt.kt   The system prompt (verbatim) + answer parser
         │       ├── MediaPipeEngine.kt  Qwen on the GPU delegate, temperature 0.2
         │       ├── LlmTranslator.kt    Owns the one loaded engine
-        │       ├── ModelController.kt, ModelFileManager.kt, AppSettings.kt
+        │       ├── ModelController.kt, ModelFileManager.kt
         └── ui/                         Compose screen + ViewModel
 ```
 
@@ -197,8 +205,9 @@ permission on Android 10+ (this app's minimum).
   checks pass. GPU loading, real Qwen output quality and the notification
   flow still need a device.
 - **GPU support varies by phone.** Recent Snapdragon, Dimensity and Exynos
-  phones with OpenCL should work. If a phone's GPU cannot run the model, the
-  app says so; the **Allow CPU** switch is the fallback.
+  phones with OpenCL should work. Phones without usable OpenCL (for example
+  Google Pixels, whose Tensor chips don't ship it) cannot run the app, because
+  there is deliberately no CPU fallback.
 - **PDF structure is inferred.** PDFs store positioned text, not headings or
   lists, so structure is recovered from font sizes, bold text, bullet glyphs,
   numbering and indentation. It works well on documents exported from Word,

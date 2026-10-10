@@ -53,7 +53,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -135,8 +134,6 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             item(key = "model") {
                 ModelCard(
                     status = state.model,
-                    allowCpu = state.allowCpu,
-                    onAllowCpu = viewModel::setAllowCpu,
                     canChange = state.model !is ModelStatus.Preparing && !state.live.running,
                     onImport = { modelPicker.launch(arrayOf("*/*")) },
                     onRescan = viewModel::rescanModel,
@@ -227,8 +224,6 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 @Composable
 private fun ModelCard(
     status: ModelStatus,
-    allowCpu: Boolean,
-    onAllowCpu: (Boolean) -> Unit,
     canChange: Boolean,
     onImport: () -> Unit,
     onRescan: () -> Unit,
@@ -279,20 +274,6 @@ private fun ModelCard(
                 TextButton(onClick = onImport, enabled = canChange) { Text("Import model") }
                 if (status is ModelStatus.Missing || status is ModelStatus.Failed) {
                     TextButton(onClick = onRescan, enabled = canChange) { Text("Rescan") }
-                }
-            }
-            // GPU only by default; the CPU is an explicit, visible opt-in.
-            if (status is ModelStatus.Failed || allowCpu) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Allow CPU", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "Only if this phone's GPU can't run the model. Much slower.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(checked = allowCpu, onCheckedChange = onAllowCpu, enabled = canChange)
                 }
             }
         }

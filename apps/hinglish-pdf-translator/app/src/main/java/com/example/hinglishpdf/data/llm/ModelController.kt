@@ -26,7 +26,6 @@ sealed interface ModelStatus {
 class ModelController(
     private val files: ModelFileManager,
     private val translator: LlmTranslator,
-    private val settings: AppSettings,
     private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
@@ -61,7 +60,7 @@ class ModelController(
                 return
             }
             _status.value = ModelStatus.Preparing("Loading ${file.name} onto the GPU…")
-            translator.load(file, allowCpu = settings.allowCpu)
+            translator.load(file)
             _status.value = ModelStatus.Ready(file.name, translator.backendName ?: "CPU")
         } catch (e: CancellationException) {
             throw e

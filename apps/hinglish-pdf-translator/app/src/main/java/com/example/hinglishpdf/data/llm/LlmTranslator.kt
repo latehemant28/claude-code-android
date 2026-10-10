@@ -26,11 +26,11 @@ class LlmTranslator(private val context: Context) {
 
     val contextTokens: Int get() = engine?.contextTokens ?: 1280
 
-    suspend fun load(modelFile: File, allowCpu: Boolean) = mutex.withLock {
+    suspend fun load(modelFile: File) = mutex.withLock {
         withContext(Dispatchers.Default) {
             engine?.close()
             engine = null
-            engine = MediaPipeEngine.create(context, modelFile, allowCpu)
+            engine = MediaPipeEngine.create(context, modelFile)
         }
     }
 

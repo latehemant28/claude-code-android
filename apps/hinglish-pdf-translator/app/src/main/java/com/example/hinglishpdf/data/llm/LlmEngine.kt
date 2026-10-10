@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 
 /** A loaded on-device model that turns one prompt into a streamed response. */
 interface LlmEngine {
-    /** "GPU" (or "CPU" when explicitly allowed), for display. */
+    /** Always "GPU" in this app; for display. */
     val backendName: String
 
     /** Prompt + response token budget of one generation. */

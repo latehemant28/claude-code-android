@@ -34,7 +34,6 @@ import java.io.File
 
 data class TranslatorUiState(
     val model: ModelStatus = ModelStatus.Preparing("Looking for a model…"),
-    val allowCpu: Boolean = false,
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
@@ -72,7 +71,6 @@ data class LivePage(
 }
 
 private data class LocalState(
-    val allowCpu: Boolean = false,
     val selectedBookId: Long? = null,
     val importing: Boolean = false,
     val message: String? = null,
@@ -81,7 +79,7 @@ private data class LocalState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
-    private val local = MutableStateFlow(LocalState(allowCpu = app.settings.allowCpu))
+    private val local = MutableStateFlow(LocalState())
 
     val state: StateFlow<TranslatorUiState> = combine(
         app.modelController.status,
@@ -90,7 +88,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         app.monitor.status.map { it.copy(liveText = "", pageTranslations = emptyList()) }.distinctUntilChanged(),
         local,
     ) { model, books, live, l ->
-        TranslatorUiState(model, l.allowCpu, books, l.selectedBookId, live, l.importing, l.message)
+        TranslatorUiState(model, books, l.selectedBookId, live, l.importing, l.message)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TranslatorUiState())
 
     /**
@@ -120,13 +118,6 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
                 TranslationService.start(app)
             }
         }
-    }
-
-    /** Opt-in CPU fallback for phones whose GPU cannot run the model; reloads the model. */
-    fun setAllowCpu(allow: Boolean) {
-        app.settings.allowCpu = allow
-        local.update { it.copy(allowCpu = allow) }
-        if (!state.value.live.running) app.modelController.refresh()
     }
 
     fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
