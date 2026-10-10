@@ -209,6 +209,7 @@ app/
 ├── proguard-rules.pro
 └── src/main/
     ├── AndroidManifest.xml         INTERNET, foreground service (specialUse), wake lock, notifications
+    ├── res/mipmap-*/               Launcher icon: adaptive (purple background + PDF→अ artwork), legacy, round
     └── java/com/example/hinglishpdf/
         ├── HinglishApp.kt          App-wide singletons (DB, Gemini fallback engine, settings)
         ├── MainActivity.kt
