@@ -42,8 +42,11 @@ writing.
 3. Rebuild. `app/build.gradle.kts` reads the key into
    `BuildConfig.GEMINI_API_KEY`, and `GeminiHinglishModel` in
    `TranslationRepository.kt` passes it to `GenerativeModel`. No Kotlin file
-   contains the key. A build without a key shows "This build has no Gemini API
-   key" and won't start translating.
+   contains the key.
+
+**No key in the build?** The app then asks for one and keeps it only in its
+private storage on that phone (never in code or git). A key in
+`local.properties` always takes priority.
 
 **Keep the key private.** A key compiled into an APK can be extracted by
 anyone who has that APK, so don't publish an APK with your key inside. If a key
@@ -184,6 +187,7 @@ app/
         ├── data/
         │   ├── TranslationRepository.kt  Gemini client, pacing, retries, page translation Flow
         │   ├── llm/HinglishPrompt.kt     The system instruction (verbatim) + answer parser
+        │   ├── settings/GeminiKeyStore.kt BuildConfig key, or one pasted into the app
         │   ├── db/                       Room: books, pages (PK = bookId + pageNumber), DAOs
         │   ├── pdf/                      PDFBox extraction + layout analysis per page
         │   ├── epub/EpubBook.kt          EPUB reading and translated copy

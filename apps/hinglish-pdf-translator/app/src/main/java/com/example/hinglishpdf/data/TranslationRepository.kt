@@ -82,13 +82,17 @@ fun interface HinglishModel {
 
 /**
  * Google Gemini via the official Android SDK (`com.google.ai.client.generativeai`).
- * The API key comes from BuildConfig, which Gradle fills from local.properties.
+ * The API key defaults to BuildConfig's, which Gradle fills from local.properties;
+ * the app passes a key pasted on the phone when the build has none.
  */
-class GeminiHinglishModel(private val modelName: String = GEMINI_MODEL_NAME) : HinglishModel {
+class GeminiHinglishModel(
+    apiKey: String = BuildConfig.GEMINI_API_KEY,
+    private val modelName: String = GEMINI_MODEL_NAME,
+) : HinglishModel {
 
     private val model = GenerativeModel(
         modelName = modelName,
-        apiKey = BuildConfig.GEMINI_API_KEY,
+        apiKey = apiKey,
         generationConfig = generationConfig { temperature = 0.2f },
         // Books contain violence, romance, medicine... Don't let the default
         // filters refuse ordinary literature mid-book.
@@ -125,7 +129,7 @@ class GeminiHinglishModel(private val modelName: String = GEMINI_MODEL_NAME) : H
                     GeminiException.Transient("Gemini rate limit reached", retryAfter(e.message), e)
                 }
             is InvalidAPIKeyException -> GeminiException.Fatal(
-                "Gemini rejected the API key. Check GEMINI_API_KEY in local.properties and rebuild the app.", e,
+                "Gemini rejected the API key. Check the key (local.properties, or the one saved in the app).", e,
             )
             is UnsupportedUserLocationException ->
                 GeminiException.Fatal("The Gemini API is not available in your country or region.", e)
