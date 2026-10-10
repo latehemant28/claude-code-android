@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Bundle
+import android.os.Parcel
+import android.view.ViewTreeObserver
 import android.os.Message
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -34,16 +37,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,6 +79,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.airbnb.lottie.compose.LottieAnimation
@@ -128,8 +132,10 @@ fun ApiKeyBrowser(
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
-    var url by remember { mutableStateOf(provider.keyPageUrl) }
-    var menu by remember { mutableStateOf(false) }
+    var url by rememberSaveable { mutableStateOf(provider.keyPageUrl) }
+    // The page itself (history, current address) survives rotation and process death:
+    // back from the email app, the user is on the same OTP page, not the home page.
+    val browserState = rememberSaveable(saver = BrowserState.Saver) { BrowserState() }
     var hint by rememberSaveable { mutableStateOf(true) }
     var video by rememberSaveable { mutableStateOf(false) }
     // Copied text that looks like a key but has an unknown shape: offered, not saved.
@@ -137,7 +143,7 @@ fun ApiKeyBrowser(
     var captured by remember { mutableStateOf(false) }
     // A sign-in popup ("Continue with Google" and the like), shown over the page.
     var popup by remember { mutableStateOf<WebView?>(null) }
-    val capture by rememberUpdatedState { text: String? ->
+    val capture by rememberUpdatedState { text: String?, offerUnknown: Boolean ->
         if (!captured) {
             val found = ApiKeyDetector.detect(text, provider)
             if (found != null) {
@@ -145,15 +151,25 @@ fun ApiKeyBrowser(
                 clearClipboard(context)
                 CookieManager.getInstance().flush()
                 onKeyCaptured(found.first, found.second)
-            } else {
+            } else if (offerUnknown) {
                 looksLikeKey(text)?.let { unknownKey = it }
             }
         }
     }
 
+    // Leaving for the email app or the external browser: write cookies (the sign-in) to disk now.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) CookieManager.getInstance().flush()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
     DisposableEffect(context) {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
-        val listener = ClipboardManager.OnPrimaryClipChangedListener { capture(clipboardText(context)) }
+        val listener = ClipboardManager.OnPrimaryClipChangedListener { capture(clipboardText(context), true) }
         clipboard?.addPrimaryClipChangedListener(listener)
         onDispose { clipboard?.removePrimaryClipChangedListener(listener) }
     }
@@ -175,6 +191,17 @@ fun ApiKeyBrowser(
         val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect { dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE) }
         val keyboardOpen = WindowInsets.isImeVisible
+
+        // Back from Chrome (or anywhere) with a key copied there: Android doesn't tell a
+        // background app about copies, so look at the clipboard when the browser regains focus.
+        val dialogView = LocalView.current
+        DisposableEffect(dialogView) {
+            val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+                if (focused) capture(clipboardText(context), false)
+            }
+            dialogView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+            onDispose { dialogView.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
+        }
 
         // Back closes a popup, then goes back inside the website, then closes the browser.
         BackHandler {
@@ -212,21 +239,15 @@ fun ApiKeyBrowser(
                                 contentDescription = if (video) "Stop video tutorial" else "Watch video tutorial",
                             )
                         }
-                        IconButton(onClick = { webView?.reload() }) { Icon(Icons.Filled.Refresh, contentDescription = "Reload") }
-                        Box {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
-                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                // Last resort only: Google refuses some sign-ins inside apps.
-                                DropdownMenuItem(
-                                    text = { Text("Sign-in blocked? Open in browser") },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
-                                    onClick = {
-                                        menu = false
-                                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                                    },
-                                )
-                            }
+                        // For password managers, email codes or a refused sign-in: finish in the
+                        // phone's own browser, copy the key there, come back; it is picked up.
+                        IconButton(onClick = {
+                            CookieManager.getInstance().flush()
+                            openInExternalBrowser(context, url)
+                        }) {
+                            Icon(Icons.Filled.OpenInBrowser, contentDescription = "Open in Chrome / External Browser")
                         }
+                        IconButton(onClick = { webView?.reload() }) { Icon(Icons.Filled.Refresh, contentDescription = "Reload") }
                     },
                 )
                 if (progress in 0..99) {
@@ -249,15 +270,19 @@ fun ApiKeyBrowser(
                                 ctx,
                                 onProgress = { progress = it },
                                 onUrl = { url = it },
-                                onCopied = { capture(it) },
+                                onCopied = { capture(it, true) },
                                 onPopup = { popup = it },
                                 onPopupClosed = { popup = null },
                             ).also {
-                                it.loadUrl(provider.keyPageUrl)
+                                // Where the user left off (after rotation or process death), else the key page.
+                                browserState.restoreInto(it, home = provider.keyPageUrl)
                                 webView = it
                             }
                         },
-                        onRelease = { it.destroy() },
+                        onRelease = {
+                            browserState.detach(it)
+                            it.destroy()
+                        },
                     )
                     popup?.let { window ->
                         // The sign-in popup, over the page until it closes itself (or ✕).
@@ -479,6 +504,74 @@ private fun configure(view: WebView) = with(view.settings) {
     CookieManager.getInstance().setAcceptCookie(true)
     // Sign-in flows hop between domains (e.g. a provider and its login service).
     CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
+}
+
+/**
+ * The in-app browser's page, saved with the screen's state (rotation, and
+ * process death while the user is away reading an email code): the WebView's
+ * own history and page via [WebView.saveState], plus the current address on
+ * its own in case the history is too large to keep or cannot be restored.
+ * Cookies, and so the sign-in, are on disk already (flushed when the app
+ * goes to the background). A sign-in popup is not kept: its page belonged to
+ * the window that opened it.
+ */
+internal class BrowserState(private var restored: Bundle? = null) {
+    private var webView: WebView? = null
+
+    fun save(): Bundle {
+        val view = webView ?: return restored ?: Bundle()
+        CookieManager.getInstance().flush()
+        return Bundle().apply {
+            view.url?.let { putString(KEY_URL, it) }
+            val history = Bundle()
+            if (view.saveState(history) != null && sizeOf(history) <= MAX_HISTORY_BYTES) putBundle(KEY_HISTORY, history)
+        }
+    }
+
+    /** Shows the saved page in [view]: its history if possible, else the saved address, else [home]. */
+    fun restoreInto(view: WebView, home: String) {
+        webView = view
+        val saved = restored
+        restored = null
+        val history = saved?.getBundle(KEY_HISTORY)
+        if (history != null && view.restoreState(history) != null) return
+        view.loadUrl(saved?.getString(KEY_URL) ?: home)
+    }
+
+    /** The view is going away: keep what it showed in case the screen is saved after this. */
+    fun detach(view: WebView) {
+        if (webView === view) {
+            restored = save()
+            webView = null
+        }
+    }
+
+    companion object {
+        private const val KEY_URL = "url"
+        private const val KEY_HISTORY = "history"
+
+        /** Saved screen state has to stay small (the whole app shares about 1 MB). */
+        private const val MAX_HISTORY_BYTES = 200_000
+
+        val Saver: Saver<BrowserState, Bundle> = Saver(save = { it.save() }, restore = { BrowserState(it) })
+
+        private fun sizeOf(bundle: Bundle): Int {
+            val parcel = Parcel.obtain()
+            return try {
+                parcel.writeBundle(bundle)
+                parcel.dataSize()
+            } finally {
+                parcel.recycle()
+            }
+        }
+    }
+}
+
+/** Opens [url] in the phone's default browser (Chrome, usually). */
+fun openInExternalBrowser(context: Context, url: String) {
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE))
+    }
 }
 
 /** The clipboard's text, if any. */

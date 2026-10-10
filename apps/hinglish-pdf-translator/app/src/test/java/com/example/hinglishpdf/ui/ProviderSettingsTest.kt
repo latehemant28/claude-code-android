@@ -43,7 +43,7 @@ class ProviderSettingsTest {
         val settings = ProviderSettings(ApplicationProvider.getApplicationContext()).state.value
         compose.setContent {
             HinglishPdfTheme {
-                Surface { ProviderSettingsContent(settings, null, false, {}, { _, _ -> }, {}, { _, _ -> }) }
+                Surface { ProviderSettingsContent(settings, null, false, {}, { _, _ -> }, {}, { _, _ -> }, false, {}) }
             }
         }
         compose.onNodeWithText("Get API Key").assertIsDisplayed()

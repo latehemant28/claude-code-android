@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -120,10 +121,15 @@ fun ProviderSettingsSheet(
     onAutoSaveKey: (AIProvider, String) -> Unit,
     onRemoveKey: (AIProvider) -> Unit,
     onSetModel: (AIProvider, String) -> Unit,
+    browserOpen: Boolean,
+    onBrowserOpenChange: (Boolean) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        ProviderSettingsContent(settings, activeModel, busy, onSelect, onSaveKey, onRemoveKey, onSetModel, onAutoSaveKey)
+        ProviderSettingsContent(
+            settings, activeModel, busy, onSelect, onSaveKey, onRemoveKey, onSetModel,
+            browserOpen, onBrowserOpenChange, onAutoSaveKey,
+        )
     }
 }
 
@@ -137,12 +143,14 @@ fun ProviderSettingsContent(
     onSaveKey: (AIProvider, String) -> Unit,
     onRemoveKey: (AIProvider) -> Unit,
     onSetModel: (AIProvider, String) -> Unit,
+    browserOpen: Boolean,
+    onBrowserOpenChange: (Boolean) -> Unit,
     onAutoSaveKey: (AIProvider, String) -> Unit = onSaveKey,
 ) {
     val provider = settings.provider
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
-    var browserOpen by rememberSaveable { mutableStateOf(false) }
+    val browserShown by rememberUpdatedState(browserOpen)
     var key by rememberSaveable(provider) { mutableStateOf("") }
     var pasted by rememberSaveable(provider) { mutableStateOf(false) }
 
@@ -150,11 +158,11 @@ fun ProviderSettingsContent(
         ApiKeyBrowser(
             provider,
             onKeyCaptured = { owner, captured ->
-                browserOpen = false
+                onBrowserOpenChange(false)
                 onAutoSaveKey(owner, captured)
             },
             onClose = { copied ->
-                browserOpen = false
+                onBrowserOpenChange(false)
                 if (copied != null && !settings.configured) {
                     key = copied
                     pasted = true
@@ -167,7 +175,7 @@ fun ProviderSettingsContent(
     val view = LocalView.current
     DisposableEffect(view, settings) {
         val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
-            if (focused && !browserOpen) {
+            if (focused && !browserShown) {
                 ApiKeyDetector.detect(clipboardText(context), provider)?.let { (owner, found) ->
                     if (settings.key(owner) != found) {
                         clearClipboard(context)
@@ -255,7 +263,7 @@ fun ProviderSettingsContent(
                 "Paste your ${provider.displayName} API key. It is kept only on this phone.",
                 style = MaterialTheme.typography.bodyMedium,
             )
-            FilledTonalButton(onClick = { browserOpen = true }, modifier = Modifier.fillMaxWidth()) {
+            FilledTonalButton(onClick = { onBrowserOpenChange(true) }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.Key, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Get API Key")

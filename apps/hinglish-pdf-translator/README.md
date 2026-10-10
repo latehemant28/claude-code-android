@@ -109,9 +109,31 @@ as Chrome on the phone (without the WebView's "; wv" mark, which Google and
 some other sign-in pages refuse or show blank), supports sign-in popups
 ("Continue with Google" opens over the page, closes itself when done), keeps
 cookies, DOM storage and the database API on, and resizes above the keyboard
-(the hint and the video step aside while typing). If a sign-in is still
-refused, the browser's ⋮ menu has **Sign-in blocked? Open in browser**; the
-key copied there is saved when you come back.
+(the hint and the video step aside while typing).
+
+**Open in Chrome / External Browser:** the browser's header has a visible
+"open in browser" icon, next to the video ▶ and Reload. It opens the page
+you are on in the phone's default browser. Use it when the sign-in needs a
+password manager, an email OTP or a refused Google sign-in. Finish there,
+copy the key, and come back: the key is saved as soon as the app is in front
+again, with no pasting.
+
+**Leaving for an OTP (process death):** Android may kill the app while you
+are in your email app. When you come back, everything is where you left it:
+
+- The key sheet and its in-app browser are still open. Their visibility lives
+  in the ViewModel's `SavedStateHandle` (`provider_sheet`, `key_browser`).
+- The page is still the OTP screen, not the provider's home page.
+  `WebView.saveState()` goes into the saved-instance state through a
+  `rememberSaveable` saver, and `restoreState()` brings back the page and
+  its back stack. Cookies are flushed whenever the app goes to the
+  background, so the half-finished sign-in survives too.
+- If the WebView can't restore its history, the last URL is reloaded instead.
+  The history is capped at 200 KB so it never overflows the saved state.
+- An open book in the reader is reopened, if its copy is still there.
+
+Saving a key or dismissing the sheet clears this state, so the sheet does
+not pop up again by itself.
 
 > Google's OAuth policy asks apps to sign users in through the system browser
 > (Custom Tabs), not an embedded WebView. Hiding the WebView mark works today

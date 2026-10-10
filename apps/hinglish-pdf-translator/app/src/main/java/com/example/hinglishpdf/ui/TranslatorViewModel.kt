@@ -1,9 +1,12 @@
 package com.example.hinglishpdf.ui
 
 import android.net.Uri
+import android.os.Bundle
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.hinglishpdf.HinglishApp
@@ -115,7 +118,16 @@ private data class LocalState(
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
+/**
+ * [saved] is the process-death-proof part of the UI state: which sheet or
+ * screen was open (the API key sheet, its in-app browser, the reader), so a
+ * user who was killed in the background while fetching an OTP comes back to
+ * the very screen they left.
+ */
+class TranslatorViewModel(
+    private val app: HinglishApp,
+    private val saved: SavedStateHandle = SavedStateHandle(),
+) : ViewModel() {
 
     private val local = MutableStateFlow(LocalState())
 
@@ -210,7 +222,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     fun saveApiKey(provider: AIProvider, key: String) {
         app.providers.saveKey(provider, key)
         app.resetFailover()
-        _providerSheet.value = false
+        closeProviderSheet()
         _keySaved.value = provider
     }
 
@@ -223,7 +235,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         app.providers.saveKey(provider, key)
         app.resetFailover()
         if (!state.value.live.running) app.providers.select(provider)
-        _providerSheet.value = false
+        closeProviderSheet()
         _keySaved.value = provider
     }
 
@@ -317,10 +329,34 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         }
     }
 
-    private val _reader = MutableStateFlow<ReaderDocument?>(null)
+    private val _reader = MutableStateFlow(restoreReader())
 
-    /** The book open in the in-app reader, if any (survives rotation with the ViewModel). */
+    /**
+     * The book open in the in-app reader, if any. It survives rotation with the
+     * ViewModel and process death through [saved] (the exported copy stays in
+     * the app's files, so it is simply reopened).
+     */
     val reader: StateFlow<ReaderDocument?> = _reader.asStateFlow()
+
+    private fun openReader(document: ReaderDocument?) {
+        _reader.value = document
+        saved[KEY_READER] = document?.let {
+            Bundle().apply {
+                putLong("book", it.bookId)
+                putString("title", it.title)
+                putString("path", it.file.path)
+                putString("format", it.format.name)
+            }
+        }
+    }
+
+    private fun restoreReader(): ReaderDocument? {
+        val bundle = saved.get<Bundle>(KEY_READER) ?: return null
+        val file = File(bundle.getString("path") ?: return null)
+        val format = DocFormat.entries.firstOrNull { it.name == bundle.getString("format") }
+        if (!file.isFile || format == null) return null
+        return ReaderDocument(bundle.getLong("book"), bundle.getString("title").orEmpty(), file, format)
+    }
 
     val readerDark: StateFlow<Boolean> = app.preferences.readerDark
     val readerScale: StateFlow<Float> = app.preferences.readerScale
@@ -337,7 +373,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         viewModelScope.launch {
             try {
                 val file = app.exporter.exportForReading(book, format)
-                _reader.value = ReaderDocument(book.id, book.title, file, format)
+                openReader(ReaderDocument(book.id, book.title, file, format))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -348,16 +384,25 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         }
     }
 
-    fun closeReader() {
-        _reader.value = null
-    }
+    fun closeReader() = openReader(null)
 
     /** The "AI provider & API key" sheet (status banner, menu, or Translate without a key). */
-    private val _providerSheet = MutableStateFlow(false)
-    val providerSheet: StateFlow<Boolean> = _providerSheet.asStateFlow()
+    val providerSheet: StateFlow<Boolean> = saved.getStateFlow(KEY_PROVIDER_SHEET, false)
+
+    /** The in-app "Get API Key" browser, opened from that sheet. */
+    val keyBrowser: StateFlow<Boolean> = saved.getStateFlow(KEY_KEY_BROWSER, false)
 
     fun showProviderSheet(show: Boolean) {
-        _providerSheet.value = show
+        if (show) saved[KEY_PROVIDER_SHEET] = true else closeProviderSheet()
+    }
+
+    fun showKeyBrowser(show: Boolean) {
+        saved[KEY_KEY_BROWSER] = show
+    }
+
+    private fun closeProviderSheet() {
+        saved[KEY_KEY_BROWSER] = false
+        saved[KEY_PROVIDER_SHEET] = false
     }
 
     fun delete(book: BookEntity) {
@@ -378,8 +423,12 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     fun messageShown() = local.update { it.copy(message = null) }
 
     companion object {
+        const val KEY_PROVIDER_SHEET = "provider_sheet"
+        const val KEY_KEY_BROWSER = "key_browser"
+        const val KEY_READER = "reader"
+
         val Factory = viewModelFactory {
-            initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp) }
+            initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp, createSavedStateHandle()) }
         }
     }
 }

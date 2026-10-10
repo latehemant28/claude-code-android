@@ -111,6 +111,7 @@ fun TranslatorScreen(
     /** Runs once the Terms are accepted (the translation the user was starting). */
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     val providerSheet by viewModel.providerSheet.collectAsStateWithLifecycle()
+    val keyBrowser by viewModel.keyBrowser.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val targets = remember { SpotlightTargets() }
     val keySaved by viewModel.keySaved.collectAsStateWithLifecycle()
@@ -173,6 +174,8 @@ fun TranslatorScreen(
             onAutoSaveKey = viewModel::autoSaveKey,
             onRemoveKey = viewModel::removeApiKey,
             onSetModel = viewModel::setModel,
+            browserOpen = keyBrowser,
+            onBrowserOpenChange = viewModel::showKeyBrowser,
         )
     }
 
