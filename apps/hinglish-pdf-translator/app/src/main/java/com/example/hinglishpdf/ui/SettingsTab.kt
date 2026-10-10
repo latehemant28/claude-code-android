@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Lock
@@ -33,6 +34,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import com.example.hinglishpdf.BuildConfig
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.document.DocFormat
+import com.example.hinglishpdf.data.llm.Language
 import com.example.hinglishpdf.ui.theme.brand
 
 /** The engine card's wording. */
@@ -62,14 +65,20 @@ const val ENGINE_TEXT = "Our app is like a luxury car, but YOU choose the engine
     "AI provider you select. Connect your own API key to pay only the actual AI cost, with zero app markup."
 
 /**
- * The Settings tab: "Choose Your AI Engine" (each provider with its key
- * status), the output format and reading style, help and legal.
+ * The Settings tab, mostly for the helper who sets the app up: spoken help
+ * on / off, "Choose Your AI Engine" (each provider with its key status),
+ * From / To, the output format and reading style, help and legal.
  */
 @Composable
 fun SettingsTab(
     state: TranslatorUiState,
     onEngine: (AIProvider) -> Unit,
     onOutputFormat: (DocFormat) -> Unit,
+    onSourceLanguage: (Language) -> Unit,
+    onTargetLanguage: (Language) -> Unit,
+    onSwapLanguages: () -> Unit,
+    voiceHelp: Boolean,
+    onVoiceHelp: (Boolean) -> Unit,
     onTextStyle: () -> Unit,
     onShowTutorial: () -> Unit,
     onShowTerms: () -> Unit,
@@ -79,7 +88,40 @@ fun SettingsTab(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        item(key = "voice") {
+            SectionCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(Say.spokenHelp.text(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            Say.spokenHelpDetail.text(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = voiceHelp, onCheckedChange = onVoiceHelp)
+                }
+            }
+        }
+
         item(key = "engine") { EngineCard(state, onEngine) }
+
+        item(key = "languages") {
+            LanguageCard(
+                source = state.sourceLanguage,
+                target = state.targetLanguage,
+                onSource = onSourceLanguage,
+                onTarget = onTargetLanguage,
+                onSwap = onSwapLanguages,
+            )
+        }
 
         item(key = "translation") {
             SectionCard {

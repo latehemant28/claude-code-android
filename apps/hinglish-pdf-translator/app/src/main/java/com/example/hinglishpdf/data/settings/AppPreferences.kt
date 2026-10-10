@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The From / To languages, the output format toggle, the Terms of Use
- * acceptance, the reader settings and the first-launch flags, saved on this
+ * acceptance, the reader and voice settings and the first-launch flags, saved on this
  * phone (app-private SharedPreferences).
  */
 class AppPreferences(context: Context) {
@@ -104,7 +104,35 @@ class AppPreferences(context: Context) {
         _termsAcceptedAt.value = now
     }
 
+    private val _voiceHelp = MutableStateFlow(prefs.getBoolean(VOICE_HELP, true))
+
+    /** Spoken help: every big button says what it does, in Hindi or English. On by default. */
+    val voiceHelp: StateFlow<Boolean> = _voiceHelp.asStateFlow()
+
+    fun setVoiceHelp(on: Boolean) {
+        prefs.edit().putBoolean(VOICE_HELP, on).apply()
+        _voiceHelp.value = on
+    }
+
+    private val _speechRate = MutableStateFlow(prefs.getFloat(SPEECH_RATE, 1f))
+
+    /** How fast books are read aloud: 1 = normal, [SLOW_SPEECH] = slow. */
+    val speechRate: StateFlow<Float> = _speechRate.asStateFlow()
+
+    fun setSpeechRate(rate: Float) {
+        prefs.edit().putFloat(SPEECH_RATE, rate).apply()
+        _speechRate.value = rate
+    }
+
+    /** Where listening stopped in a book (its paragraph number), to carry on from there. */
+    fun listenPosition(bookId: Long): Int = prefs.getInt("$LISTEN_POSITION$bookId", 0)
+
+    fun setListenPosition(bookId: Long, paragraph: Int) {
+        prefs.edit().putInt("$LISTEN_POSITION$bookId", paragraph).apply()
+    }
+
     companion object {
+        const val SLOW_SPEECH = 0.75f
         const val READER_SCALE_MIN = 0.8f
         const val READER_SCALE_MAX = 2f
         private const val OUTPUT_FORMAT = "output_format"
@@ -116,6 +144,9 @@ class AppPreferences(context: Context) {
         private const val READER_SCALE = "reader_scale"
         private const val TERMS_ACCEPTED_AT = "terms_accepted_at"
         private const val TERMS_VERSION = "terms_version"
+        private const val VOICE_HELP = "voice_help"
+        private const val SPEECH_RATE = "speech_rate"
+        private const val LISTEN_POSITION = "listen_position_"
 
         /** Raise when the Terms text changes, so everyone is asked again. */
         private const val CURRENT_TERMS_VERSION = 1

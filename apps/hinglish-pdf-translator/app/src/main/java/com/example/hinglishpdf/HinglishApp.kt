@@ -14,6 +14,8 @@ import com.example.hinglishpdf.data.pdf.PdfTextExtractor
 import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.settings.AppPreferences
 import com.example.hinglishpdf.data.settings.ProviderSettings
+import com.example.hinglishpdf.data.voice.AndroidVoice
+import com.example.hinglishpdf.data.voice.Voice
 import com.example.hinglishpdf.service.Notifications
 import com.example.hinglishpdf.service.TranslationMonitor
 import com.example.hinglishpdf.ui.reader.ReaderSettingsStore
@@ -40,6 +42,9 @@ class HinglishApp : Application() {
 
     /** Output format (PDF / EPUB) and Terms of Use acceptance. */
     val preferences by lazy { AppPreferences(this) }
+
+    /** The phone's text-to-speech voice: spoken help, and books read aloud. */
+    val voice: Voice by lazy { AndroidVoice(this) }
 
     val db by lazy { AppDatabase.create(this) }
     val translationRepository by lazy {

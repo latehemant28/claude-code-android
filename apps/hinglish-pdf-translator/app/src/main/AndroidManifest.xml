@@ -21,6 +21,13 @@
         (this app's minSdk).
     -->
 
+    <!-- Android 11+: lets the app find the phone's text-to-speech engine (spoken help, Listen). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".HinglishApp"
         android:allowBackup="false"

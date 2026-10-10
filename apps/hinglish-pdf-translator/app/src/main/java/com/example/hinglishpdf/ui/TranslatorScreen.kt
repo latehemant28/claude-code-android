@@ -63,12 +63,12 @@ import com.example.hinglishpdf.ui.reader.ReaderSettingsSheet
 /** The exact title of the main dashboard's top bar. */
 const val DASHBOARD_TITLE = "Bring your own key"
 
-private class TabSpec(val tab: AppTab, val label: String, val selected: ImageVector, val unselected: ImageVector)
+private class TabSpec(val tab: AppTab, val label: Phrase, val selected: ImageVector, val unselected: ImageVector)
 
 private val TABS = listOf(
-    TabSpec(AppTab.TRANSLATE, "Translate", Icons.Filled.Translate, Icons.Outlined.Translate),
-    TabSpec(AppTab.LIBRARY, "Library", Icons.AutoMirrored.Filled.LibraryBooks, Icons.AutoMirrored.Outlined.LibraryBooks),
-    TabSpec(AppTab.SETTINGS, "Settings", Icons.Filled.Settings, Icons.Outlined.Settings),
+    TabSpec(AppTab.TRANSLATE, Say.tabTranslate, Icons.Filled.Translate, Icons.Outlined.Translate),
+    TabSpec(AppTab.LIBRARY, Say.tabBooks, Icons.AutoMirrored.Filled.LibraryBooks, Icons.AutoMirrored.Outlined.LibraryBooks),
+    TabSpec(AppTab.SETTINGS, Say.tabSettings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
 /** What can be done with a book, shared by the dashboard and the library. */
@@ -78,6 +78,8 @@ class BookActions(
     val onResume: (BookEntity) -> Unit,
     val onExport: (BookEntity) -> Unit,
     val onRead: (BookEntity) -> Unit,
+    /** "Listen": the translated pages read aloud. */
+    val onListen: (BookEntity) -> Unit,
     val onCopy: () -> Unit,
     val onDelete: (BookEntity) -> Unit,
 )
@@ -87,7 +89,6 @@ class BookActions(
  * (books, progress and their actions) and Settings — plus the sheets and
  * first-launch helpers that sit on top of them.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TranslatorScreen(
     viewModel: TranslatorViewModel,
@@ -98,6 +99,25 @@ fun TranslatorScreen(
     tour: Boolean = false,
     onTourDone: () -> Unit = {},
     onShowTutorial: () -> Unit = {},
+) {
+    // Written and spoken in Hindi or English (see useHindi); voice help as set in Settings.
+    val target by viewModel.state.collectAsStateWithLifecycle()
+    val voiceHelp by viewModel.voiceHelp.collectAsStateWithLifecycle()
+    val hindi = useHindi(target.targetLanguage)
+    CompositionLocalProvider(LocalHindi provides hindi, LocalGuide provides VoiceGuide(viewModel.voice, hindi, voiceHelp)) {
+        MainScreen(viewModel, languagePrompt, onLanguagePromptDone, tour, onTourDone, onShowTutorial)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MainScreen(
+    viewModel: TranslatorViewModel,
+    languagePrompt: Boolean,
+    onLanguagePromptDone: () -> Unit,
+    tour: Boolean,
+    onTourDone: () -> Unit,
+    onShowTutorial: () -> Unit,
 ) {
     // Both collected on the main thread; the heavy work behind them runs on Dispatchers.Default.
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -110,6 +130,8 @@ fun TranslatorScreen(
     var showTerms by rememberSaveable { mutableStateOf(false) }
     /** "Your file's text will be sent to AI": asked before every file is chosen. */
     var showConsent by rememberSaveable { mutableStateOf(false) }
+    var showLanguagePicker by rememberSaveable { mutableStateOf(false) }
+    val voiceHelp by viewModel.voiceHelp.collectAsStateWithLifecycle()
     /** Runs once the Terms are accepted (the translation the user was starting). */
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     val providerSheet by viewModel.providerSheet.collectAsStateWithLifecycle()
@@ -157,6 +179,7 @@ fun TranslatorScreen(
         onResume = { book -> withTerms { viewModel.resume(book) } },
         onExport = viewModel::saveToDownloads,
         onRead = viewModel::readNow,
+        onListen = viewModel::listen,
         onCopy = {
             val message = try {
                 clipboard.setText(AnnotatedString(viewModel.plainText()))
@@ -215,14 +238,18 @@ fun TranslatorScreen(
 
     keySaved?.let { provider -> KeySavedCelebration(provider, onDone = viewModel::keySavedShown) }
 
-    if (languagePrompt) {
+    if (languagePrompt || showLanguagePicker) {
         TargetLanguageDialog(
             current = state.targetLanguage,
             onSelect = {
                 viewModel.setTargetLanguage(it)
-                onLanguagePromptDone()
+                showLanguagePicker = false
+                if (languagePrompt) onLanguagePromptDone()
             },
-            onDismiss = onLanguagePromptDone,
+            onDismiss = {
+                showLanguagePicker = false
+                if (languagePrompt) onLanguagePromptDone()
+            },
         )
     }
 
@@ -245,8 +272,8 @@ fun TranslatorScreen(
                             Text(
                                 when (tab) {
                                     AppTab.TRANSLATE -> DASHBOARD_TITLE
-                                    AppTab.LIBRARY -> "Library"
-                                    AppTab.SETTINGS -> "Settings"
+                                    AppTab.LIBRARY -> Say.tabBooks.text()
+                                    AppTab.SETTINGS -> Say.tabSettings.text()
                                 },
                                 fontWeight = FontWeight.Bold,
                             )
@@ -291,9 +318,7 @@ fun TranslatorScreen(
                             targets = targets,
                             actions = actions,
                             onConfigure = { viewModel.showProviderSheet(true) },
-                            onSourceLanguage = viewModel::setSourceLanguage,
-                            onTargetLanguage = viewModel::setTargetLanguage,
-                            onSwapLanguages = viewModel::swapLanguages,
+                            onPickLanguage = { showLanguagePicker = true },
                             onPick = {
                                 if (!state.configured) {
                                     viewModel.showProviderSheet(true)
@@ -303,7 +328,6 @@ fun TranslatorScreen(
                                     withTerms { showConsent = true }
                                 }
                             },
-                            onShowTerms = { afterTerms = null; showTerms = true },
                             onOpenLibrary = { viewModel.selectTab(AppTab.LIBRARY) },
                         )
                         AppTab.LIBRARY -> LibraryTab(
@@ -320,6 +344,11 @@ fun TranslatorScreen(
                                 viewModel.showProviderSheet(true)
                             },
                             onOutputFormat = viewModel::setOutputFormat,
+                            onSourceLanguage = viewModel::setSourceLanguage,
+                            onTargetLanguage = viewModel::setTargetLanguage,
+                            onSwapLanguages = viewModel::swapLanguages,
+                            voiceHelp = voiceHelp,
+                            onVoiceHelp = viewModel::setVoiceHelp,
                             onTextStyle = { showTextSettings = true },
                             onShowTutorial = onShowTutorial,
                             onShowTerms = { afterTerms = null; showTerms = true },
@@ -370,7 +399,7 @@ private fun BottomTabs(selected: AppTab, translating: Boolean, onSelect: (AppTab
                         )
                     }
                 },
-                label = { Text(spec.label, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal) },
+                label = { Text(spec.label.text(), fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal) },
                 colors = NavigationBarItemDefaults.colors(
                     indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                     selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,

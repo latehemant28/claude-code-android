@@ -29,6 +29,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -196,3 +202,60 @@ fun GradientIcon(icon: ImageVector, modifier: Modifier = Modifier, size: Dp = 44
 
 /** Vertical rhythm between stacked items inside a card. */
 val CardSpacing = Arrangement.spacedBy(10.dp)
+
+/** The green of "go": the main action, as the spoken help calls it ("the green button"). */
+val GoGreen = Brush.linearGradient(listOf(Color(0xFF047857), Color(0xFF10B981)))
+
+/**
+ * A big picture button for people who may not read: a large icon, one or
+ * two words, and a 🔊 button that says what it does ([onSpeak]).
+ */
+@Composable
+fun BigTile(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    background: Brush,
+    onClick: () -> Unit,
+    onSpeak: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentColor: Color = Color.White,
+    minHeight: Dp = 112.dp,
+) {
+    val shape = MaterialTheme.shapes.large
+    Surface(
+        onClick = onClick,
+        shape = shape,
+        shadowElevation = 3.dp,
+        color = Color.Transparent,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier.background(background, shape).heightIn(min = minHeight).padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(64.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(38.dp))
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = contentColor, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)
+                if (subtitle != null) {
+                    Text(subtitle, color = contentColor.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            SpeakButton(onSpeak, tint = contentColor)
+        }
+    }
+}
+
+/** 🔊: says what the thing next to it is for. */
+@Composable
+fun SpeakButton(onSpeak: () -> Unit, tint: Color = MaterialTheme.colorScheme.primary, modifier: Modifier = Modifier) {
+    IconButton(onClick = onSpeak, modifier = modifier.size(52.dp)) {
+        Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Listen to this", tint = tint, modifier = Modifier.size(30.dp))
+    }
+}

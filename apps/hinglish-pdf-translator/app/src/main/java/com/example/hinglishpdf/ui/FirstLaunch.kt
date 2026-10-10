@@ -96,12 +96,14 @@ fun ByokBadge(modifier: Modifier = Modifier) {
  */
 @Composable
 fun TargetLanguageDialog(current: Language, onSelect: (Language) -> Unit, onDismiss: () -> Unit) {
+    val guide = LocalGuide.current
+    LaunchedEffect(Unit) { guide.say(Say.chooseLanguageHelp) }
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 6.dp) {
             Column(Modifier.padding(top = 24.dp, start = 20.dp, end = 20.dp, bottom = 8.dp)) {
                 Text("🌐", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.align(Alignment.CenterHorizontally))
                 Text(
-                    "Select your Target Language",
+                    Say.chooseLanguage.text(),
                     style = MaterialTheme.typography.headlineSmall,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -115,22 +117,26 @@ fun TargetLanguageDialog(current: Language, onSelect: (Language) -> Unit, onDism
                     items(Language.targets) { language ->
                         val chosen = language == current
                         Card(
-                            onClick = { onSelect(language) },
+                            onClick = {
+                                guide.sayIn(language.nativeName ?: language.englishName, language)
+                                onSelect(language)
+                            },
                             colors = CardDefaults.cardColors(
                                 containerColor = if (chosen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                             ),
                             border = if (chosen) CardDefaults.outlinedCardBorder() else null,
                         ) {
                             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-                                Text(language.shortName, style = MaterialTheme.typography.titleSmall)
-                                language.nativeName?.let {
-                                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                // The language's own script first and large: recognisable without reading English.
+                                Text(language.nativeName ?: language.shortName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                if (language.nativeName != null) {
+                                    Text(language.shortName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                 }
-                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Not now") }
+                TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text(Say.notNow.text()) }
             }
         }
     }
@@ -139,10 +145,10 @@ fun TargetLanguageDialog(current: Language, onSelect: (Language) -> Unit, onDism
 // --------------------------------------------------------- spotlight tour
 
 /** The main screen's tour, one highlighted element at a time. */
-enum class TourStep(val title: String, val text: String) {
-    API_KEY("🔑 Your AI key", "Tap here to connect a free AI engine. It takes a minute and stays on your phone."),
-    LANGUAGE("🌐 Your language", "Choose the language your book should be translated into."),
-    UPLOAD("📚 Your book", "Then tap here to pick a PDF or EPUB. That's it!"),
+enum class TourStep(val title: Phrase, val text: Phrase) {
+    API_KEY(Say.tourKeyTitle, Say.tourKeyText),
+    LANGUAGE(Say.tourLanguageTitle, Say.tourLanguageText),
+    UPLOAD(Say.tourBookTitle, Say.tourBookText),
 }
 
 /** Where each tour target is on screen, filled in by [spotlightTarget]. */
@@ -169,7 +175,11 @@ fun SpotlightTour(
     var index by rememberSaveable { mutableIntStateOf(0) }
     val step = TourStep.entries[index]
     val last = index == TourStep.entries.lastIndex
-    LaunchedEffect(step) { bringIntoView(step) }
+    val guide = LocalGuide.current
+    LaunchedEffect(step) {
+        guide.say(step.text) // each step is also read aloud
+        bringIntoView(step)
+    }
     val pulse by rememberInfiniteTransition(label = "spotlight").animateFloat(
         0f, 1f, infiniteRepeatable(tween(1_300), RepeatMode.Restart), label = "pulse",
     )
@@ -212,10 +222,10 @@ fun SpotlightTour(
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("${index + 1} / ${TourStep.entries.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    Text(step.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(step.text, style = MaterialTheme.typography.bodyLarge)
+                    Text(step.title.text(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(step.text.text(), style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        if (last) "👆 Tap to start" else "👆 Tap to continue",
+                        if (last) Say.tapToStart.text() else Say.tapToContinue.text(),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -242,7 +252,7 @@ fun SpotlightTour(
                 .padding(bottom = 104.dp) // above the bottom tabs
                 .border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(50)),
         ) {
-            Text("Skip tour", color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp))
+            Text(Say.skipTour.text(), color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp))
         }
     }
 }

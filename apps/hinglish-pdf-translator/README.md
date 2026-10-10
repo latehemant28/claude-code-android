@@ -32,21 +32,45 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
   paragraph breaks are restored after translation.
 - **Model fallback:** a prioritized list of models per provider; a retired,
   out-of-quota or rate-limited model is swapped for the next one automatically.
+- **Made for everyone, including people who cannot read:**
+  - **It talks.** Every big button has a 🔊 that says what it does, and the
+    button itself says it too when tapped (spoken help, on by default,
+    switchable in Settings). The spoken help and the easy screens are in
+    simple Hindi when the book is translated into Hindi or the phone is in
+    Hindi / India, in English otherwise. It uses the phone's own
+    text-to-speech voice; nothing extra is sent anywhere.
+  - **Pictures first:** big coloured tiles with large icons and one or two
+    words: 🔑 the key (only until it is set up), 🌐 the language (in its own
+    script, e.g. हिन्दी), and one big **green** "किताब चुनें" (Choose a book)
+    tile, which the spoken help calls "the green button".
+  - **Listen (सुनें):** the translated book is read aloud by the phone, part
+    by part, with three big buttons (back, play / pause, next), the part being
+    read shown in large text, and slow / normal speed. It carries on where it
+    stopped, and comes back after the app is closed. If the phone has no voice
+    for the book's language, a button opens the voice download.
+  - **Consent in voice and pictures:** before each file, a page → AI cloud
+    picture and a short explanation that is read aloud; the answer is a big
+    green ✅ "हाँ, भेजें" (Yes, send) or a big red ❌ "नहीं" (No).
+  - **The key needs a helper once.** Creating an AI provider's API key means
+    signing up on its website, which needs someone who can read. The app
+    says so ("किसी जानकार से एक बार लगवा लें"); after that, everything is
+    pictures and voice.
 - **Simple, three tabs:** **Translate**, **Library** and **Settings**, in an
   indigo / slate Material 3 theme, light or dark with the phone.
-- **Dashboard in three steps** (titled **Bring your own key**, under the
-  BYOK badge): **① AI engine** (the provider with a green "Connected" light,
-  or "Set up"), **② Language** (From / To), **③ Choose a book** (**Select
-  PDF / EPUB**); below, the book being translated, live.
+- **Dashboard** (titled **Bring your own key**, under the BYOK badge): a
+  "🔊 Hear how it works" button, then the key, language and green book
+  tiles; below, the book being translated, with a progress ring and big
+  **Listen** / **Read** / **Pause** buttons. The book's own language (From)
+  and the output format are in Settings.
 - **Consent before every upload:** choosing a file first shows **"Your
   file's text will be sent to AI"**: which provider gets the text, that only
   text is sent (pictures stay on the phone), that the provider's privacy
   terms apply, and to avoid confidential documents. The file picker opens
   only after ticking **"I agree to send this file's text to …"** and tapping
   **Agree & choose file**.
-- **Library:** every book as a card with a progress bar and one main button
-  (**Read**, **Pause** or **Resume**); **Save to Downloads**, **Copy text**
-  and **Delete** are in its ⋮ menu.
+- **My books:** every book with a progress ring and big **Listen**,
+  **Read**, **Pause** / **Resume** buttons; **Save to Downloads**, **Copy
+  text** and **Delete** are in its ⋮ menu.
 - **In-app reader:** opens a finished book inside the app (PDF pages with
   `PdfRenderer`, EPUB chapters in a local WebView), edge to edge, with bars
   that hide while you read, dark mode and gliding text size / zoom.
@@ -514,7 +538,9 @@ app/
         │   ├── ai/                       AITranslator strategies: Gemini, OpenAI, Groq, Anthropic;
         │   │                             AIProvider (key pages, models), FallbackTranslator
         │   ├── llm/                      Language (From / To list), TranslationPrompt (prompt + answer parser)
-        │   ├── settings/                 Provider + keys, languages, output format, Terms, tutorial flag
+        │   ├── settings/                 Provider + keys, languages, output format, Terms, tutorial flag,
+        │   │                             spoken help, reading speed, listening position
+        │   ├── voice/Voice.kt            The phone's text-to-speech voice (spoken help, Listen)
         │   ├── db/                       Room: books, pages (PK = bookId + pageNumber), DAOs
         │   ├── pdf/                      PDFBox extraction + layout analysis per page
         │   ├── epub/                     EpubBook (read, translated copy), EpubWriter (new EPUB 3)
@@ -525,7 +551,8 @@ app/
         └── ui/                           TranslatorScreen (tabs, top bar, sheets) + ViewModel;
                                           DashboardTab (3 steps), LibraryTab, SettingsTab, Components
                                           (cards, gradient button, pill toggle, progress);
-                                          UploadConsentDialog; language card, provider settings
+                                          UploadConsentDialog; Words (Hindi / English phrases, spoken
+                                          help); listen/ = Listen player; language card, provider settings
                                           sheet, in-app key browser,
                                           Terms dialog; FirstLaunch (BYOK badge, language popup,
                                           spotlight tour); theme/ = indigo / slate palette and

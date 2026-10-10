@@ -40,6 +40,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.example.hinglishpdf.data.voice.Voice
+import com.example.hinglishpdf.ui.listen.ListenDocument
+import com.example.hinglishpdf.ui.listen.paragraphsOf
 import java.io.File
 
 /** The three bottom tabs. */
@@ -203,6 +207,10 @@ class TranslatorViewModel(
             ) {
                 TranslationService.start(app)
             }
+        }
+        // Killed while listening: open the same book again.
+        saved.get<Long>(KEY_LISTEN)?.let { id ->
+            viewModelScope.launch { app.db.bookDao().get(id)?.let(::listen) }
         }
     }
 
@@ -376,6 +384,7 @@ class TranslatorViewModel(
         viewModelScope.launch {
             try {
                 val file = app.exporter.exportForReading(book, format)
+                if (_listening.value != null) closeListen()
                 openReader(ReaderDocument(book.id, book.title, file, format))
             } catch (e: CancellationException) {
                 throw e
@@ -388,6 +397,42 @@ class TranslatorViewModel(
     }
 
     fun closeReader() = openReader(null)
+
+    private val _listening = MutableStateFlow<ListenDocument?>(null)
+
+    /** The book being read aloud ("Listen"), if any. */
+    val listening: StateFlow<ListenDocument?> = _listening.asStateFlow()
+
+    /** The phone's voice: spoken help and books read aloud. */
+    val voice: Voice get() = app.voice
+
+    val voiceHelp: StateFlow<Boolean> = app.preferences.voiceHelp
+    val speechRate: StateFlow<Float> = app.preferences.speechRate
+
+    fun setVoiceHelp(on: Boolean) = app.preferences.setVoiceHelp(on)
+
+    fun setSpeechRate(rate: Float) = app.preferences.setSpeechRate(rate)
+
+    fun listenPosition(bookId: Long) = app.preferences.listenPosition(bookId)
+
+    fun setListenPosition(bookId: Long, paragraph: Int) = app.preferences.setListenPosition(bookId, paragraph)
+
+    /** "Listen": the book's translated pages, read aloud by the phone's voice. */
+    fun listen(book: BookEntity) {
+        openReader(null)
+        saved[KEY_LISTEN] = book.id
+        viewModelScope.launch {
+            val pages = withContext(Dispatchers.IO) { app.db.pageDao().pages(book.id) }
+            val paragraphs = withContext(Dispatchers.Default) { paragraphsOf(pages) }
+            _listening.value = ListenDocument(book.id, book.title, book.toLanguage, paragraphs)
+        }
+    }
+
+    fun closeListen() {
+        app.voice.stop()
+        saved.remove<Long>(KEY_LISTEN)
+        _listening.value = null
+    }
 
     /** The "AI provider & API key" sheet (status banner, menu, or Translate without a key). */
     val providerSheet: StateFlow<Boolean> = saved.getStateFlow(KEY_PROVIDER_SHEET, false)
@@ -437,6 +482,7 @@ class TranslatorViewModel(
         const val KEY_KEY_BROWSER = "key_browser"
         const val KEY_READER = "reader"
         const val KEY_TAB = "tab"
+        const val KEY_LISTEN = "listen"
 
         val Factory = viewModelFactory {
             initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp, createSavedStateHandle()) }

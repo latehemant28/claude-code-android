@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,25 +19,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,7 +48,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -107,7 +100,7 @@ fun LibraryTab(
         item(key = "summary") {
             val done = state.books.count { it.book.status == BookStatus.COMPLETED }
             Text(
-                "${state.books.size} ${if (state.books.size == 1) "book" else "books"} · $done translated",
+                "📚 ${state.books.size}   ✅ $done",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -151,30 +144,34 @@ fun LibraryTab(
 
 @Composable
 private fun EmptyLibrary(onTranslateBook: () -> Unit) {
+    val guide = LocalGuide.current
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        GradientIcon(Icons.Filled.AutoStories, size = 88.dp)
+        GradientIcon(Icons.Filled.AutoStories, size = 96.dp)
         Spacer(Modifier.height(20.dp))
-        Text("Your library is empty", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Translated books appear here, with their progress, ready to read or export.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Say.noBooks.text(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            SpeakButton({ guide.sayNow(Say.noBooksHelp) })
+        }
+        Spacer(Modifier.height(20.dp))
+        BigTile(
+            icon = Icons.Filled.UploadFile,
+            title = Say.chooseBook.text(),
+            subtitle = "PDF / EPUB",
+            background = GoGreen,
+            onClick = onTranslateBook,
+            onSpeak = { guide.sayNow(Say.chooseBookHelp) },
         )
-        Spacer(Modifier.height(20.dp))
-        GradientButton("Translate a book", Icons.AutoMirrored.Filled.MenuBook, onTranslateBook, Modifier.widthIn(max = 280.dp))
     }
 }
 
 /**
- * One book: title, languages, a progress bar and one main button (Read,
- * Pause or Resume); the rarer actions (save to Downloads, copy, delete) are
- * in the ⋮ menu.
+ * One book: a ring that fills as it is translated, the title, and big
+ * buttons — Listen, Read, Pause / Resume. Save to Downloads, copy and delete
+ * are in the ⋮ menu.
  */
 @Composable
 private fun BookCard(
@@ -193,17 +190,24 @@ private fun BookCard(
         onClick = { actions.onSelect(book.id) },
         color = if (selected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Row(verticalAlignment = Alignment.Top) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ProgressRing(entry)
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     book.title,
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${book.format.name} · ${book.fromLanguage.englishName} → ${book.toLanguage.englishName}",
+                    "${bookStatus(entry, running)} · ${entry.translatedPages}/${book.pageCount.takeIf { it > 0 } ?: "?"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "${book.format.name} · ${book.fromLanguage.englishName} → ${book.toLanguage.nativeName ?: book.toLanguage.englishName}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -235,52 +239,18 @@ private fun BookCard(
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        val total = book.pageCount
-        if (total > 0) {
-            GradientProgress(entry.translatedPages.toFloat() / total)
-        } else if (running) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (book.status == BookStatus.FAILED || liveLabel != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                liveLabel ?: "${book.error}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (liveLabel == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
-        Spacer(Modifier.height(6.dp))
-        val unit = book.unitName
-        val status = liveLabel ?: when (book.status) {
-            BookStatus.QUEUED -> "Waiting to start"
-            BookStatus.READING -> "Reading ${unit}s…"
-            BookStatus.TRANSLATING -> "Interrupted: tap Resume"
-            BookStatus.PAUSED -> "Paused"
-            BookStatus.COMPLETED -> "Done"
-            BookStatus.FAILED -> "Stopped: ${book.error}"
-        }
-        Text(
-            "${entry.translatedPages} of ${total.takeIf { it > 0 } ?: "?"} ${unit}s · $status",
-            style = MaterialTheme.typography.bodySmall,
-            color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(10.dp))
-        when {
-            running -> OutlinedButton(onClick = actions.onPause, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Pause")
-            }
-            book.status == BookStatus.COMPLETED -> Button(
-                onClick = { actions.onRead(book) },
-                enabled = !opening,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(if (opening) "Opening…" else "Read")
-            }
-            else -> FilledTonalButton(onClick = { actions.onResume(book) }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Resume")
-            }
-        }
+        Spacer(Modifier.height(12.dp))
+        BookButtons(entry, running, opening, actions)
     }
 }
 

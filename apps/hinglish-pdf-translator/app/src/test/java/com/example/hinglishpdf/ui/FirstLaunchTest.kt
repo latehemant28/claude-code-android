@@ -59,7 +59,7 @@ class FirstLaunchTest {
                 TranslatorScreen(viewModel(factory = TranslatorViewModel.Factory), languagePrompt = true, onLanguagePromptDone = { done = true })
             }
         }
-        compose.onNodeWithText("Select your Target Language").assertExists()
+        compose.onNodeWithText(Say.chooseLanguage.hi).assertExists() // Hindi until a language is chosen
         save(ShadowDialog.getLatestDialog().window!!.decorView, "first-launch-language")
         compose.onNodeWithText("Spanish").performClick()
         assertTrue(done)
@@ -67,7 +67,7 @@ class FirstLaunchTest {
     }
 
     @Test
-    fun `the spotlight tour highlights language, key, upload in turn`() {
+    fun `the spotlight tour highlights key, language, upload in turn`() {
         var done = false
         compose.setContent {
             HinglishPdfTheme {
@@ -76,7 +76,7 @@ class FirstLaunchTest {
         }
         compose.onNodeWithText(BYOK_BADGE_TEXT).assertExists()
         for ((i, step) in TourStep.entries.withIndex()) {
-            compose.onNodeWithText(step.title).assertExists()
+            compose.onNodeWithText(step.title.hi).assertExists()
             compose.onNodeWithText("${i + 1} / 3").assertExists()
             save(compose.activity.window.decorView, "tour-${i + 1}")
             assertFalse(done)

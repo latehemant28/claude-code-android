@@ -39,7 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.llm.Language
 
 /**
- * Step 2, "From [Auto-Detect ▾] ⇄ To [Hindi ▾]": two pill buttons, each
+ * Settings, "From [Auto-Detect ▾] ⇄ To [Hindi ▾]": two pill buttons, each
  * opening the list of languages. Applies to books added from now on; each
  * book keeps the pair it was added with.
  */
@@ -53,7 +53,7 @@ fun LanguageCard(
     modifier: Modifier = Modifier,
 ) {
     SectionCard(modifier) {
-        StepHeader(2, "Language")
+        SectionLabel(Say.languageTitle.text())
         Spacer(Modifier.size(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             LanguagePill("From", source, Language.sources, onSource, Modifier.weight(1f))
