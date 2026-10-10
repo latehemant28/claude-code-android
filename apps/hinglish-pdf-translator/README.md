@@ -164,18 +164,16 @@ Speaker labels such as "YOUTH:" are part of the text and stay.
 ### Free-tier limits and errors
 
 [`TranslationRepository.kt`](app/src/main/java/com/example/hinglishpdf/data/TranslationRepository.kt)
-handles Gemini's errors as follows:
+paces requests and handles Gemini's errors as follows:
 
 | Situation | What the app does |
 |---|---|
-| Rate limit (429 per minute) | Waits as long as Gemini asks ("retry in 23s") or backs off 15 s → 5 min; slows the request pace |
-| Network drop, timeout, 5xx | Same retry with backoff; the notification shows "retrying in 30 s" |
-| Daily quota used up | Stops the book with a clear message; **Resume** tomorrow continues at the same page |
-| Invalid key, unknown model, unsupported region | Stops with a message saying what to fix |
-| Still failing after 8 retries | Stops; **Resume** continues at the same page |
-
-Requests are spaced at least 4 s apart (at most 15 a minute), and the gap grows
-after every rate-limit error.
+| Every chunk | A fixed **4.5 s pause** after each translated chunk (about 13 requests a minute, under the free tier's 15) |
+| Rate limit (429) | Another model in `GEMINI_MODELS` is tried first; if all are limited, **waits 60 s** (longer if Gemini asks) and tries again, **with no retry limit**. The book never stops for a rate limit, and the notification shows Gemini's own message |
+| "limit: 0" (no free quota for this model and key) | The model is skipped for the session, like a retired one |
+| Daily quota used up | Stops the book with a clear message; **Resume** later continues at the same page |
+| Network drop, timeout, 5xx | Retried with backoff (15 s → 5 min), up to 8 times, then stops; **Resume** continues at the same page |
+| Invalid key, region, or no usable model | Stops with a message saying what to fix |
 
 ### Threads
 

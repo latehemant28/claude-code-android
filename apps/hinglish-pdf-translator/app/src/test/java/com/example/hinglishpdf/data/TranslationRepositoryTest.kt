@@ -40,7 +40,7 @@ class TranslationRepositoryTest {
                 marker to "HI(${block.removePrefix(marker)})"
             }.toMutableList()
             when (script(prompts.size, blocks.size)) {
-                Fault.RATE_LIMIT -> throw GeminiException.Transient("Gemini rate limit reached", retryAfterMillis = 20_000)
+                Fault.RATE_LIMIT -> throw GeminiException.Transient("Gemini rate limit reached", retryAfterMillis = 20_000, rateLimited = true)
                 Fault.DAILY_QUOTA -> throw GeminiException.DailyQuota()
                 Fault.BLOCKED -> throw GeminiException.Blocked("SAFETY")
                 Fault.BAD_KEY -> throw GeminiException.Fatal("Gemini rejected the API key.")
@@ -111,14 +111,31 @@ class TranslationRepositoryTest {
     }
 
     @Test
-    fun `rate limits are waited out, as long as Gemini asks`() = runTest {
-        val gemini = FakeGemini { request, _ -> if (request <= 2) Fault.RATE_LIMIT else Fault.NONE }
+    fun `a rate limit waits a full minute, and never stops the book`() = runTest {
+        // 12 rate limits in a row: more than the old cap of 8 retries.
+        val gemini = FakeGemini { request, _ -> if (request <= 12) Fault.RATE_LIMIT else Fault.NONE }
         val start = testScheduler.currentTime
         val events = repository(gemini).translatePage(page).toList()
 
         assertEquals(PageEvent.PageFinished(expected), events.last())
-        assertEquals(listOf(20, 20), events.filterIsInstance<PageEvent.Waiting>().map { it.seconds })
-        assertTrue(testScheduler.currentTime - start >= 40_000) // honoured "retry in 20s" twice
+        val waits = events.filterIsInstance<PageEvent.Waiting>().map { it.seconds }
+        assertEquals(List(12) { 60 }, waits) // 60 s even though Gemini said "retry in 20s"
+        assertTrue(testScheduler.currentTime - start >= 12 * 60_000L)
+    }
+
+    @Test
+    fun `every chunk is followed by a 4_5 second pause`() = runTest {
+        val gemini = FakeGemini()
+        val repo = repository(gemini)
+        val start = testScheduler.currentTime
+        repo.translatePage(page).toList()
+        val afterFirst = testScheduler.currentTime
+        assertTrue(afterFirst - start >= 4_500) // one chunk on this page, then the pause
+
+        val words = { n: Int, p: String -> (1..n).joinToString(" ") { "$p$it" } + "." }
+        val longPage = (1..30).map { DocBlock(BlockKind.PARAGRAPH, words(45, "w$it")) } // 2 chunks
+        repo.translatePage(longPage).toList()
+        assertTrue(testScheduler.currentTime - afterFirst >= 2 * 4_500)
     }
 
     @Test
@@ -151,6 +168,10 @@ class TranslationRepositoryTest {
 
         assertTrue(classify(QuotaExceededException("quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier", null)) is GeminiException.DailyQuota)
         assertTrue(classify(InvalidAPIKeyException("API key not valid", null)) is GeminiException.Fatal)
+        val noFreeQuota = classify(
+            QuotaExceededException("Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-x", null),
+        )
+        assertTrue(noFreeQuota is GeminiException.ModelUnavailable) // skip it, don't wait for it
         val retired = classify(ServerException("models/gemini-x is not found for API version v1beta", null))
         assertTrue(retired is GeminiException.ModelUnavailable) // the fallback moves on to the next model
         assertTrue((classify(ServerException("429 RESOURCE_EXHAUSTED", null)) as GeminiException.Transient).rateLimited)

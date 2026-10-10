@@ -147,17 +147,29 @@ class GeminiHinglishModel(
             RegexOption.IGNORE_CASE,
         )
         private val RATE_LIMIT = Regex("\\b429\\b|RESOURCE_EXHAUSTED|quota", RegexOption.IGNORE_CASE)
+
+        /** "limit: 0": this model has no free quota at all for this key, so waiting cannot help. */
+        private val NO_QUOTA = Regex("\\blimit:\\s*0\\b", RegexOption.IGNORE_CASE)
+
+        /** Gemini's own words, shortened, for the "waiting" message. */
+        private fun detail(message: String?): String =
+            message.orEmpty().lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(140).orEmpty()
+
+        private fun rateLimited(modelName: String, message: String?, cause: Throwable) =
+            GeminiException.Transient(
+                "Gemini rate limit ($modelName: ${detail(message)})",
+                retryAfter(message), cause, rateLimited = true,
+            )
         private val RETRY_IN = Regex("retry in ([0-9.]+)s|\"retryDelay\":\\s*\"([0-9.]+)s\"", RegexOption.IGNORE_CASE)
 
         /** Sorts an SDK error into what the app should do about it. */
         fun classify(e: Throwable, modelName: String): Throwable = when (e) {
             is CancellationException, is GeminiException -> e
-            is QuotaExceededException ->
-                if (PER_DAY.containsMatchIn(e.message.orEmpty())) {
-                    GeminiException.DailyQuota(e)
-                } else {
-                    GeminiException.Transient("Gemini rate limit reached", retryAfter(e.message), e, rateLimited = true)
-                }
+            is QuotaExceededException -> when {
+                NO_QUOTA.containsMatchIn(e.message.orEmpty()) -> GeminiException.ModelUnavailable(modelName, e)
+                PER_DAY.containsMatchIn(e.message.orEmpty()) -> GeminiException.DailyQuota(e)
+                else -> rateLimited(modelName, e.message, e)
+            }
             is InvalidAPIKeyException -> GeminiException.Fatal(
                 "Gemini rejected the API key. Check the key (local.properties, or the one saved in the app).", e,
             )
@@ -170,9 +182,9 @@ class GeminiHinglishModel(
                 val message = e.message.orEmpty()
                 when {
                     NOT_FOUND.containsMatchIn(message) -> GeminiException.ModelUnavailable(modelName, e)
+                    NO_QUOTA.containsMatchIn(message) -> GeminiException.ModelUnavailable(modelName, e)
                     PER_DAY.containsMatchIn(message) -> GeminiException.DailyQuota(e)
-                    RATE_LIMIT.containsMatchIn(message) ->
-                        GeminiException.Transient("Gemini rate limit reached", retryAfter(message), e, rateLimited = true)
+                    RATE_LIMIT.containsMatchIn(message) -> rateLimited(modelName, message, e)
                     else -> GeminiException.Transient("Gemini is busy", retryAfter(message), e)
                 }
             }
@@ -197,7 +209,8 @@ class GeminiHinglishModel(
  * Tries [models] in order and moves on to the next one, silently, when a
  * model fails in a way another model can fix:
  *
- *  - retired / not found (404): skipped for the rest of this app session;
+ *  - retired / not found (404), or no free quota for this key ("limit: 0"):
+ *    skipped for the rest of this app session;
  *  - daily quota used up: skipped for an hour;
  *  - rate-limited (429): skipped until Gemini says it can be retried.
  *
@@ -218,6 +231,7 @@ class FallbackGeminiModel(
 
     private val clients = mutableMapOf<String, HinglishModel>()
     private val skipped = mutableMapOf<String, Skip>()
+    private var lastRateLimit: String? = null
 
     private val _activeModel = MutableStateFlow<String?>(null)
 
@@ -242,8 +256,10 @@ class FallbackGeminiModel(
                 when {
                     e is GeminiException.ModelUnavailable -> skip(name, Reason.RETIRED, Long.MAX_VALUE)
                     e is GeminiException.DailyQuota -> skip(name, Reason.DAILY_QUOTA, now() + DAILY_QUOTA_PAUSE_MS)
-                    e is GeminiException.Transient && e.rateLimited ->
+                    e is GeminiException.Transient && e.rateLimited -> {
+                        lastRateLimit = e.message
                         skip(name, Reason.RATE_LIMITED, now() + (e.retryAfterMillis ?: RATE_LIMIT_PAUSE_MS))
+                    }
                     else -> throw e // bad key, refused text, network: another model won't help
                 }
             }
@@ -273,11 +289,12 @@ class FallbackGeminiModel(
         return when {
             waiting.isEmpty() -> GeminiException.Fatal(
                 "None of the Gemini models are available to this API key: ${models.joinToString()}. " +
-                    "Add a current model to GEMINI_MODELS in TranslationRepository.kt.",
+                    "They are retired or have no free quota for this key (\"limit: 0\"). Check the key in " +
+                    "Google AI Studio, or add a current model to GEMINI_MODELS in TranslationRepository.kt.",
             )
             waiting.all { it.reason == Reason.DAILY_QUOTA } -> GeminiException.DailyQuota()
             else -> GeminiException.Transient(
-                "Every Gemini model is rate-limited",
+                "Every Gemini model is rate-limited" + (lastRateLimit?.let { "; last: $it" } ?: ""),
                 retryAfterMillis = (waiting.minOf { it.until } - now()).coerceAtLeast(1_000),
                 rateLimited = true,
             )
@@ -331,8 +348,13 @@ class RequestPacer(
 class TranslationRepository(
     private val model: HinglishModel,
     private val pacer: RequestPacer = RequestPacer(),
+    /** Retries for network drops and server errors; rate limits are retried without limit. */
     private val maxRetries: Int = 8,
     private val workDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** Fixed pause after every translated chunk: ~13 requests a minute, under the free tier's 15. */
+    private val chunkPauseMillis: Long = CHUNK_PAUSE_MS,
+    /** Wait after a rate-limit (429) answer before trying again. */
+    private val rateLimitWaitMillis: Long = RATE_LIMIT_WAIT_MS,
 ) {
 
     fun translatePage(blocks: List<DocBlock>): Flow<PageEvent> = flow {
@@ -353,6 +375,10 @@ class TranslationRepository(
                 result[unit.blockIndex] = parts.joinToString(" ")
             }
             emit(PageEvent.ChunkFinished(index + 1, chunks.size, result.toList()))
+
+            // Pace the free tier: a hard pause after every chunk, including the
+            // last one of a page, so the next request never comes too soon.
+            delay(chunkPauseMillis)
         }
         emit(PageEvent.PageFinished(result.toList()))
     }.flowOn(workDispatcher)
@@ -405,13 +431,21 @@ class TranslationRepository(
                 pacer.onSuccess()
                 return out.toString()
             } catch (e: GeminiException.Transient) {
+                if (e.rateLimited) {
+                    // 429: wait a full minute (longer if Gemini asks) and try
+                    // again, for as long as it takes. Never stop the book for it.
+                    pacer.onRateLimited()
+                    val wait = max(rateLimitWaitMillis, e.retryAfterMillis ?: 0L)
+                    events.emit(PageEvent.Waiting(((wait + 999) / 1000).toInt(), e.message ?: "Gemini rate limit"))
+                    delay(wait)
+                    continue
+                }
                 attempt++
                 if (attempt > maxRetries) {
                     throw GeminiException.Fatal(
                         "${e.message}. Gave up after $maxRetries retries; check the connection and tap Resume.", e,
                     )
                 }
-                pacer.onRateLimited()
                 val wait = e.retryAfterMillis ?: backoffMillis(attempt)
                 events.emit(PageEvent.Waiting(((wait + 999) / 1000).toInt(), e.message ?: "Retrying"))
                 delay(wait)
@@ -419,6 +453,11 @@ class TranslationRepository(
         }
     }
 
-    /** 15 s, 30 s, 60 s, 2 min, then 5 min at most. */
+    /** 15 s, 30 s, 60 s, 2 min, then 5 min at most (network drops and server errors). */
     private fun backoffMillis(attempt: Int): Long = min(300_000L, 15_000L shl (attempt - 1).coerceAtMost(5))
+
+    private companion object {
+        const val CHUNK_PAUSE_MS = 4_500L
+        const val RATE_LIMIT_WAIT_MS = 60_000L
+    }
 }
