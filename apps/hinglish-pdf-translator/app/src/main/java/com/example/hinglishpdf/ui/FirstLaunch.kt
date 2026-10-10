@@ -239,7 +239,7 @@ fun SpotlightTour(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 24.dp)
+                .padding(bottom = 104.dp) // above the bottom tabs
                 .border(1.dp, Color.White.copy(alpha = 0.6f), RoundedCornerShape(50)),
         ) {
             Text("Skip tour", color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 12.dp))

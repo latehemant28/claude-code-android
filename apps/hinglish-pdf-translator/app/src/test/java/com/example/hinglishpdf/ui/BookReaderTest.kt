@@ -3,6 +3,9 @@ package com.example.hinglishpdf.ui
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -65,16 +68,23 @@ class BookReaderTest {
         }
         file.outputStream().use { EpubWriter.write(it, "Book", chapters, pageMarkers = true) }
 
+        var scale by mutableFloatStateOf(1f)
         compose.setContent {
             HinglishPdfTheme {
-                BookReaderScreen(ReaderDocument(2, "Book", file, DocFormat.EPUB), false, 1f, {}, {}, {})
+                BookReaderScreen(ReaderDocument(2, "Book", file, DocFormat.EPUB), false, scale, {}, { scale = it }, {})
             }
         }
         compose.onNodeWithText("Chapter 1 of 3").assertIsDisplayed()
         compose.onNodeWithText("Next").performClick()
         compose.onNodeWithText("Chapter 2 of 3").assertIsDisplayed()
+        screenshot("reader")
         compose.onNodeWithText("Aa").performClick()
         compose.onNodeWithText("Text size").assertIsDisplayed()
         assertEquals(1, compose.onAllNodes(androidx.compose.ui.test.hasText("Dark mode")).fetchSemanticsNodes().size)
+        // A+ / A− step the size; the slider shows where it is.
+        compose.onNodeWithText("A+").performClick()
+        assertEquals(1.1f, scale, 0.001f)
+        compose.onNodeWithText("110%").assertIsDisplayed()
+        screenshot("reader-controls")
     }
 }

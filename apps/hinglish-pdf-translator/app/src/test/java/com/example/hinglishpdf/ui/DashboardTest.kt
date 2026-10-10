@@ -5,7 +5,12 @@ import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.core.app.ApplicationProvider
@@ -29,7 +34,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
-/** The main screen with the real ViewModel: progressive disclosure, the key sheet, Read Now. */
+/** The main screen with the real ViewModel: the three tabs, the key sheet, the library, Read. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi", application = HinglishApp::class)
@@ -48,8 +53,7 @@ class DashboardTest {
         }
     }
 
-    @Test
-    fun `clean dashboard, key sheet with advanced settings folded, read now`() {
+    private fun addFinishedBook() {
         val app = ApplicationProvider.getApplicationContext<HinglishApp>()
         app.preferences.acceptTerms()
         val blocks = listOf(DocBlock(BlockKind.HEADING, "Chapter 1", level = 1), DocBlock(BlockKind.PARAGRAPH, "It was a cold morning."))
@@ -61,6 +65,13 @@ class DashboardTest {
                 listOf(PageEntity(id, 1, 595f, 842f, blocks, translations = listOf("अध्याय 1", "वो एक ठंडी सुबह थी।"), translatedText = "x", translatedAt = 1)),
             )
         }
+    }
+
+    private fun tab(label: String) = compose.onNode(hasText(label) and isSelectable())
+
+    @Test
+    fun `dashboard, key sheet, library and settings`() {
+        addFinishedBook()
         lateinit var vm: TranslatorViewModel
         compose.setContent {
             HinglishPdfTheme {
@@ -69,17 +80,19 @@ class DashboardTest {
             }
         }
 
-        // No key: the highlighted banner instead of provider / key / model fields.
+        // The dashboard: its title, the badge, and the engine card asking for a key.
+        compose.onNodeWithText(DASHBOARD_TITLE).assertIsDisplayed()
+        compose.onNodeWithText(BYOK_BADGE_TEXT).assertIsDisplayed()
         compose.onNodeWithText("⚠️ API Key Required - Tap to Configure").assertIsDisplayed()
         compose.onNodeWithText("Model (optional)").assertDoesNotExist()
         // "Translate a book" sits right below the Output Format card.
         val format = compose.onNodeWithText("Output Format:").fetchSemanticsNode().boundsInRoot
         val translate = compose.onNodeWithText("Translate a book into Hindi").fetchSemanticsNode().boundsInRoot
-        assertTrue(translate.top > format.bottom && translate.top - format.bottom < 200)
-        compose.onNodeWithText("Read Now").assertIsDisplayed()
+        assertTrue("$format / $translate", translate.top > format.bottom && translate.top - format.bottom < 320)
+        listOf("Translate", "Library", "Settings").forEach { tab(it).assertIsDisplayed() }
         screenshot("dashboard-no-key")
 
-        // The banner opens the settings sheet; the model name is folded away.
+        // The engine card opens the settings sheet; the model name is folded away.
         compose.onNodeWithText("⚠️ API Key Required - Tap to Configure").performClick()
         compose.onNodeWithText("AI provider & API key").assertIsDisplayed()
         compose.onNodeWithText("Get API Key").assertIsDisplayed()
@@ -89,17 +102,42 @@ class DashboardTest {
         compose.onNodeWithText("Model (optional)").assertIsDisplayed()
         screenshot("provider-sheet-advanced")
 
-        // With a key the banner is a quiet one-liner.
+        // With a key: the provider, a green "Connected" light and the model badge.
         compose.runOnUiThread {
             vm.saveApiKey(AIProvider.GROQ, "gsk_" + "x".repeat(40))
             vm.selectProvider(AIProvider.GROQ)
         }
         compose.waitForIdle()
-        compose.onNodeWithText("🤖 Using: Groq").assertIsDisplayed()
+        compose.onNodeWithText("Groq").assertIsDisplayed()
+        compose.onNodeWithText("Connected").assertIsDisplayed()
+        compose.onNodeWithText("Auto · llama-3.3-70b-versatile").assertIsDisplayed()
         screenshot("dashboard-ready")
+        compose.onNode(hasScrollAction()).performScrollToKey("current")
+        compose.onNodeWithText("Read Now").assertIsDisplayed()
+        screenshot("dashboard-latest-book")
 
-        // Read Now writes a private reading copy and opens the reader.
-        compose.onNodeWithText("Read Now").performClick()
+        // Library: the book as a card with its progress and quick actions.
+        tab("Library").performClick()
+        compose.onNodeWithText("1 book · 1 translated").assertIsDisplayed()
+        compose.onNodeWithText("100%").assertIsDisplayed()
+        compose.onNodeWithText("Read").assertIsDisplayed()
+        compose.onNodeWithText("Export EPUB").assertIsDisplayed()
+        compose.onNodeWithText("Delete").assertIsDisplayed()
+        screenshot("library")
+        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Delete “Cold Morning”?").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
+
+        // Settings: "Choose Your AI Engine" with its drawn chip, and each provider's key status.
+        tab("Settings").performClick()
+        compose.onNodeWithText(ENGINE_TITLE).assertIsDisplayed()
+        compose.onNodeWithContentDescription("AI engine chip").assertIsDisplayed()
+        compose.onNodeWithText("In use").assertIsDisplayed()
+        screenshot("settings")
+
+        // Read (in the library) writes a private reading copy and opens the reader.
+        tab("Library").performClick()
+        compose.onNodeWithText("Read").performClick()
         try {
             compose.waitUntil(10_000) {
                 // Lets the export's result (from the IO thread) reach Robolectric's main looper.
@@ -112,5 +150,19 @@ class DashboardTest {
         val document = vm.reader.value!!
         assertEquals(DocFormat.EPUB, document.format)
         assertTrue(document.file.isFile && document.file.length() > 0)
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp-night-xxhdpi")
+    fun `dark theme`() {
+        addFinishedBook()
+        compose.setContent { HinglishPdfTheme { TranslatorScreen(viewModel(factory = TranslatorViewModel.Factory)) } }
+        compose.onNodeWithText(DASHBOARD_TITLE).assertIsDisplayed()
+        screenshot("dashboard-dark")
+        tab("Library").performClick()
+        compose.onNodeWithText("Read").assertIsDisplayed()
+        screenshot("library-dark")
+        tab("Settings").performClick()
+        screenshot("settings-dark")
     }
 }

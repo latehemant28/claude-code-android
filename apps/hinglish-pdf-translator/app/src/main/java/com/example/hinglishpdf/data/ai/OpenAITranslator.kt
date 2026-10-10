@@ -35,8 +35,9 @@ open class ChatCompletionsTranslator(
     override fun textOf(event: JsonObject): String? {
         event.obj("error")?.let { throw classify(500, event.toString(), null) }
         val choice = event.firstOf("choices") ?: return null
-        if (choice.string("finish_reason") == "content_filter") {
-            throw TranslatorException.Blocked("$providerName declined this text (content filter)")
+        when (choice.string("finish_reason")) {
+            "content_filter" -> throw TranslatorException.Blocked("$providerName declined this text (content filter)")
+            "length" -> throw TranslatorException.Truncated("$providerName's answer reached its length limit")
         }
         return choice.obj("delta")?.string("content")
     }

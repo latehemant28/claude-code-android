@@ -52,6 +52,7 @@ class PdfTextExtractor(private val context: Context) {
                     sizes += box.width to box.height
                     collector.startPage = page
                     collector.endPage = page
+                    collector.pageNumber = page
                     collector.writeText(doc, NullWriter)
                     onPage(page, pageCount)
                 }
@@ -66,7 +67,13 @@ class PdfTextExtractor(private val context: Context) {
 
         private val text = StringBuilder()
         private val positions = mutableListOf<TextPosition>()
-        private var pageNumber = 0
+        /**
+         * The page being read, set before each page. Not counted in
+         * [startPage]: PDFBox skips that call for a page without a content
+         * stream, and every later page's text would then land one page early,
+         * leaving pages that have text looking blank.
+         */
+        var pageNumber = 0
         private var pageHeight = 0f
 
         init {
@@ -75,7 +82,6 @@ class PdfTextExtractor(private val context: Context) {
 
         override fun startPage(page: PDPage) {
             super.startPage(page)
-            pageNumber++
             pageHeight = page.mediaBox.height
         }
 
@@ -108,6 +114,7 @@ class PdfTextExtractor(private val context: Context) {
                         .sorted()[glyphs.size / 2],
                     bold = glyphs.count(::isBold) * 2 > glyphs.size,
                     pageHeight = pageHeight,
+                    right = glyphs.maxOf { it.xDirAdj + it.widthDirAdj },
                 )
             }
             text.clear()

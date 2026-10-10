@@ -41,10 +41,31 @@ object TranslationPrompt {
             "with zero conversational filler from your side.",
     ).joinToString("\n")
 
+    /**
+     * Appended after [TEMPLATE]: how the answer must be laid out so it maps
+     * back onto the source block by block, and that every word is translated.
+     */
+    val OUTPUT_CONTRACT: String = listOf(
+        "OUTPUT CONTRACT:",
+        "1. 100% TRANSLATION: Translate every heading, sentence, list item and quotation into {targetLanguage}, " +
+            "from the first word to the last. Never stop early and never leave a sentence in the original language.",
+        "2. SAME BLOCKS: The text is split into blocks separated by blank lines. Answer with exactly the same " +
+            "blocks, in the same order, separated by blank lines. Never merge two blocks or split one; keep each " +
+            "block's leading marker (#, -, 1., >).",
+        "3. SHORT BLOCKS COUNT TOO: A block that is only a heading, a chapter title or a single line is still " +
+            "translated and kept as its own block.",
+    ).joinToString("\n")
+
+    /** Added for a second try when an answer was missing, cut short or partly untranslated. */
+    val STRICT_REMINDER: String =
+        "IMPORTANT: An earlier answer for this text was incomplete or left parts in the original language. " +
+            "This time translate ALL of it into {targetLanguage}, every sentence, and answer with the same blocks."
+
     /** The system prompt for a book translated from [source] (possibly Auto-Detect) into [target]. */
-    fun system(source: Language, target: Language): String = TEMPLATE
-        .replace("{sourceLanguage}", source.promptName)
-        .replace("{targetLanguage}", target.promptName)
+    fun system(source: Language, target: Language, strict: Boolean = false): String =
+        listOfNotNull(TEMPLATE, OUTPUT_CONTRACT, STRICT_REMINDER.takeIf { strict }).joinToString("\n\n")
+            .replace("{sourceLanguage}", source.promptName)
+            .replace("{targetLanguage}", target.promptName)
 
     /** The user message for one chunk: the chunk itself (the instructions are in [system]). */
     fun build(units: List<TranslationUnit>): String = chunkText(units)

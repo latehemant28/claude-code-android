@@ -5,7 +5,9 @@ import com.example.hinglishpdf.data.ai.TranslatorException
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.llm.Language
 import com.example.hinglishpdf.data.llm.TranslationPrompt
+import com.example.hinglishpdf.data.text.TextChunker
 import com.example.hinglishpdf.data.translate.BlockChunker
+import com.example.hinglishpdf.data.translate.TranslationCheck
 import com.example.hinglishpdf.data.translate.TranslationUnit
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -115,7 +117,7 @@ class TranslationRepository(
         source: Language = Language.AUTO_DETECT,
         target: Language = Language.HINDI,
     ): Flow<PageEvent> = flow {
-        val languages = Languages(source, target, TranslationPrompt.system(source, target))
+        val languages = Languages(source, target)
         val result = arrayOfNulls<String>(blocks.size)
         val pieces = mutableMapOf<Int, MutableList<String>>()
         val chunks = BlockChunker.chunk(blocks)
@@ -144,27 +146,50 @@ class TranslationRepository(
     /**
      * One chunk. If the answer cannot be matched block for block, the chunk is
      * halved and each half translated on its own (so a merged paragraph never
-     * shifts translations onto the wrong bullet). A block left empty is
-     * retried by itself; text the AI refuses is kept in English.
+     * shifts translations onto the wrong bullet).
+     *
+     * Every block's translation is then checked ([TranslationCheck]): blocks
+     * that came back empty, cut short or still in the original language are
+     * sent again together, with a strict reminder ([strict]); what is still
+     * missing or unfinished after that is translated sentence by sentence. An
+     * answer cut off by the model's length limit is redone in halves. Only
+     * text the AI refuses outright is kept in the original language.
      */
     private suspend fun translateChunk(
         units: List<TranslationUnit>,
         languages: Languages,
         events: FlowCollector<PageEvent>,
         streamTokens: Boolean,
+        strict: Boolean = false,
     ): List<String?> {
+        val prompt = if (strict) languages.strictPrompt else languages.systemPrompt
         val raw = try {
-            request(languages.systemPrompt, TranslationPrompt.build(units), events, streamTokens)
+            request(prompt, TranslationPrompt.build(units), events, streamTokens)
         } catch (e: TranslatorException.Blocked) {
-            return if (units.size == 1) listOf(null) else translateInHalves(units, languages, events)
+            return if (units.size == 1) listOf(null) else translateInHalves(units, languages, events, strict)
+        } catch (e: TranslatorException.Truncated) {
+            return if (units.size == 1) {
+                listOf(translateInParts(units[0], languages, events))
+            } else {
+                translateInHalves(units, languages, events, strict)
+            }
         }
 
         val results = TranslationPrompt.parse(raw, units, languages.target).toMutableList()
-        if (units.size > 1 && results.all { it == null }) return translateInHalves(units, languages, events)
+        if (units.size > 1 && results.all { it == null }) return translateInHalves(units, languages, events, strict)
 
-        units.forEachIndexed { i, unit ->
-            if (units.size > 1 && results[i] == null) {
-                results[i] = translateChunk(listOf(unit), languages, events, streamTokens = false).first()
+        val bad = units.indices.filter { languages.check(units[it], results[it]) != null }
+        if (bad.isEmpty()) return results
+        if (!strict) {
+            // One more try for all of them together, with the strict reminder.
+            val again = translateChunk(bad.map { units[it] }, languages, events, streamTokens = false, strict = true)
+            bad.forEachIndexed { k, i -> results[i] = again[k]?.takeIf { it.isNotBlank() } ?: results[i] }
+        } else {
+            // Already the strict try: whatever is still missing or cut short goes sentence by sentence.
+            for (i in bad) {
+                if (languages.check(units[i], results[i]) != TranslationCheck.Problem.UNTRANSLATED) {
+                    translateInParts(units[i], languages, events)?.let { results[i] = it }
+                }
             }
         }
         return results
@@ -174,14 +199,42 @@ class TranslationRepository(
         units: List<TranslationUnit>,
         languages: Languages,
         events: FlowCollector<PageEvent>,
+        strict: Boolean,
     ): List<String?> {
         val half = units.size / 2
-        return translateChunk(units.subList(0, half), languages, events, streamTokens = false) +
-            translateChunk(units.subList(half, units.size), languages, events, streamTokens = false)
+        return translateChunk(units.subList(0, half), languages, events, streamTokens = false, strict = strict) +
+            translateChunk(units.subList(half, units.size), languages, events, streamTokens = false, strict = strict)
     }
 
-    /** The book's language pair and the system prompt built from it once per page. */
-    private class Languages(val source: Language, val target: Language, val systemPrompt: String)
+    /**
+     * One block in two (or more) parts, split between sentences, each sent on
+     * its own and joined back in order; null if the block is a single short
+     * sentence that cannot be split. A part that still fails keeps its
+     * original text, so nothing is ever dropped.
+     */
+    private suspend fun translateInParts(
+        unit: TranslationUnit,
+        languages: Languages,
+        events: FlowCollector<PageEvent>,
+    ): String? {
+        val words = TextChunker.countWords(unit.text)
+        if (words < MIN_SPLIT_WORDS) return null
+        val parts = TextChunker.split(unit.text, maxWords = (words + 1) / 2)
+        if (parts.size < 2) return null
+        return parts.mapIndexed { i, part ->
+            val piece = unit.copy(text = part, continuation = unit.continuation || i > 0)
+            translateChunk(listOf(piece), languages, events, streamTokens = false, strict = true).first() ?: part
+        }.joinToString(" ")
+    }
+
+    /** The book's language pair and the system prompts built from it once per page. */
+    private class Languages(val source: Language, val target: Language) {
+        val systemPrompt = TranslationPrompt.system(source, target)
+        val strictPrompt = TranslationPrompt.system(source, target, strict = true)
+
+        fun check(unit: TranslationUnit, translation: String?) =
+            TranslationCheck.problem(unit.text, translation, source, target)
+    }
 
     /** One AI request: paced, streamed, retried on rate limits and network errors. */
     private suspend fun request(
@@ -256,5 +309,8 @@ class TranslationRepository(
     private companion object {
         const val CHUNK_PAUSE_MS = 4_500L
         const val RATE_LIMIT_WAIT_MS = 60_000L
+
+        /** Blocks shorter than this are not split any further. */
+        const val MIN_SPLIT_WORDS = 8
     }
 }

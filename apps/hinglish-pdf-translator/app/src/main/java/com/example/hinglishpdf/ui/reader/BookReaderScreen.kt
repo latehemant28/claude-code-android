@@ -1,6 +1,26 @@
 package com.example.hinglishpdf.ui.reader
 
 import android.graphics.Bitmap
+import android.annotation.SuppressLint
+import android.view.GestureDetector
+import android.view.MotionEvent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -42,7 +62,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -98,8 +117,11 @@ private val InkDark = Color(0xFFE6E1E5)
 
 /**
  * The in-app reader ("Read Now"): PDFs page by page with PdfRenderer, EPUBs
- * chapter by chapter in a local WebView. A dark mode toggle and a text size
- * (EPUB) or zoom (PDF) slider; both are remembered.
+ * chapter by chapter in a local WebView, edge to edge with nothing but the
+ * book on screen. The top and bottom bars step aside as soon as the reader
+ * scrolls; a tap on the page brings them back (and they hide again after a
+ * few seconds). "Aa" opens the text size (EPUB) or zoom (PDF) and dark mode;
+ * size changes glide instead of jumping. Both settings are remembered.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +134,25 @@ fun BookReaderScreen(
     onClose: () -> Unit,
 ) {
     BackHandler(onBack = onClose)
+    var chrome by rememberSaveable { mutableStateOf(true) }
     var controls by rememberSaveable { mutableStateOf(false) }
+    /** Bumped when a tap brings the bars back: they hide again after a while. */
+    var shownByTap by remember { mutableIntStateOf(0) }
+    LaunchedEffect(chrome, controls, shownByTap) {
+        if (chrome && !controls && shownByTap > 0) {
+            delay(AUTO_HIDE_MILLIS)
+            chrome = false
+        }
+    }
+    val toggleChrome: () -> Unit = {
+        chrome = !chrome
+        if (chrome) shownByTap++ else controls = false
+    }
+    val hideChrome: () -> Unit = {
+        if (!controls) chrome = false
+    }
+    // Text size and zoom glide to each new value.
+    val shownScale by animateFloatAsState(scale, tween(220), label = "scale")
     val paper = if (dark) PaperDark else PaperLight
     val ink = if (dark) InkDark else InkLight
 
@@ -128,10 +168,23 @@ fun BookReaderScreen(
         onDispose { activity?.enableEdgeToEdge() }
     }
 
-    Scaffold(
-        containerColor = paper,
-        contentColor = ink,
-        topBar = {
+    val epub = if (document.format == DocFormat.EPUB) rememberEpub(document.file) else null
+    var chapter by rememberSaveable(document.file.path) { mutableIntStateOf(0) }
+
+    Box(Modifier.fillMaxSize().background(paper)) {
+        val content = Modifier.fillMaxSize().statusBarsPadding()
+        when {
+            document.format == DocFormat.PDF ->
+                PdfReader(document.file, dark, scale, shownScale, toggleChrome, hideChrome, content)
+            epub != null -> EpubReader(epub, chapter, { chapter = it }, dark, shownScale, paper, toggleChrome, hideChrome, content)
+        }
+
+        AnimatedVisibility(
+            visible = chrome,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             TopAppBar(
                 title = { Text(document.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
@@ -149,25 +202,36 @@ fun BookReaderScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = paper,
+                    containerColor = paper.copy(alpha = 0.96f),
                     titleContentColor = ink,
                     navigationIconContentColor = ink,
                     actionIconContentColor = ink,
                 ),
             )
-        },
-    ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            AnimatedVisibility(visible = controls) {
-                ReaderControls(document.format, dark, scale, onDark, onScale, ink)
-            }
-            when (document.format) {
-                DocFormat.PDF -> PdfReader(document.file, dark, scale, Modifier.weight(1f))
-                DocFormat.EPUB -> EpubReader(document.file, dark, scale, paper, ink, Modifier.weight(1f))
+        }
+
+        AnimatedVisibility(
+            visible = chrome,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            Surface(color = paper.copy(alpha = 0.96f), contentColor = ink, shadowElevation = 6.dp) {
+                Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                    AnimatedVisibility(visible = controls) {
+                        ReaderControls(document.format, dark, scale, onDark, onScale, ink)
+                    }
+                    if (epub != null && epub.chapters.isNotEmpty()) {
+                        ChapterBar(chapter, epub.chapters.size, { chapter = it }, ink)
+                    }
+                }
             }
         }
     }
 }
+
+/** How long bars brought back by a tap stay on screen. */
+private const val AUTO_HIDE_MILLIS = 3_500L
 
 @Composable
 private fun ReaderControls(
@@ -178,6 +242,9 @@ private fun ReaderControls(
     onScale: (Float) -> Unit,
     ink: Color,
 ) {
+    val min = AppPreferences.READER_SCALE_MIN
+    val max = AppPreferences.READER_SCALE_MAX
+    val step = 0.1f
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Dark mode", style = MaterialTheme.typography.titleSmall, color = ink, modifier = Modifier.weight(1f))
@@ -189,17 +256,53 @@ private fun ReaderControls(
             color = ink,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("A", fontSize = 14.sp, color = ink)
+            IconButton(onClick = { onScale((scale - step).coerceIn(min, max)) }, enabled = scale > min) {
+                Text("A−", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = ink)
+            }
             Slider(
                 value = scale,
                 onValueChange = onScale,
-                valueRange = AppPreferences.READER_SCALE_MIN..AppPreferences.READER_SCALE_MAX,
+                valueRange = min..max,
                 colors = SliderDefaults.colors(),
-                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
             )
-            Text("A", fontSize = 24.sp, color = ink)
+            IconButton(onClick = { onScale((scale + step).coerceIn(min, max)) }, enabled = scale < max) {
+                Text("A+", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = ink)
+            }
         }
-        HorizontalDivider(color = ink.copy(alpha = 0.15f))
+        Text(
+            "${(scale * 100).roundToInt()}%",
+            style = MaterialTheme.typography.labelSmall,
+            color = ink.copy(alpha = 0.7f),
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
+        HorizontalDivider(color = ink.copy(alpha = 0.15f), modifier = Modifier.padding(top = 6.dp))
+    }
+}
+
+/** "‹ Previous · Chapter 2 of 9 · Next ›" for EPUBs. */
+@Composable
+private fun ChapterBar(chapter: Int, count: Int, onChapter: (Int) -> Unit, ink: Color) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = { onChapter(chapter - 1) }, enabled = chapter > 0) {
+            Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = null)
+            Text("Previous")
+        }
+        Text(
+            "Chapter ${chapter + 1} of $count",
+            style = MaterialTheme.typography.labelLarge,
+            color = ink,
+            modifier = Modifier.weight(1f),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        TextButton(onClick = { onChapter(chapter + 1) }, enabled = chapter < count - 1) {
+            Text("Next")
+            Spacer(Modifier.width(2.dp))
+            Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = null)
+        }
     }
 }
 
@@ -247,20 +350,36 @@ private class PdfSource(file: File) {
 }
 
 @Composable
-private fun PdfReader(file: File, dark: Boolean, scale: Float, modifier: Modifier) {
+private fun PdfReader(
+    file: File,
+    dark: Boolean,
+    scale: Float,
+    shownScale: Float,
+    onTap: () -> Unit,
+    onScroll: () -> Unit,
+    modifier: Modifier,
+) {
     val source = remember(file) { PdfSource(file) }
     DisposableEffect(source) { onDispose { source.close() } }
     val pages = source.renderer.pageCount
     val density = LocalDensity.current
+    val list = rememberLazyListState()
+    // Reading on: the bars step aside.
+    LaunchedEffect(list) {
+        snapshotFlow { list.isScrollInProgress }.collect { if (it) onScroll() }
+    }
     BoxWithConstraints(modifier.fillMaxWidth()) {
-        val pageWidth = maxWidth * scale - 16.dp
+        // The page glides to the new zoom; it is re-rendered sharp at the final size only.
+        val pageWidth = maxWidth * shownScale - 16.dp
         // Rendering above ~1800 px wide costs memory without visible gain.
-        val widthPx = with(density) { pageWidth.roundToPx() }.coerceIn(1, 1800)
+        val widthPx = with(density) { (maxWidth * scale - 16.dp).roundToPx() }.coerceIn(1, 1800)
         LazyColumn(
+            state = list,
             modifier = Modifier
                 .fillMaxSize()
+                .pointerInput(Unit) { detectTapGestures { onTap() } }
                 .then(if (scale > 1f) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
-            contentPadding = PaddingValues(8.dp),
+            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -308,18 +427,42 @@ private class EpubState {
     @Volatile var restoreScrollY = 0
 }
 
+/** An open EPUB: its zip and its chapters in reading order. */
+private class OpenEpub(val zip: ZipFile, val chapters: List<String>)
+
 @Composable
-private fun EpubReader(file: File, dark: Boolean, scale: Float, paper: Color, ink: Color, modifier: Modifier) {
-    val zip = remember(file) { ZipFile(file) }
-    DisposableEffect(zip) { onDispose { runCatching { zip.close() } } }
-    val chapters = remember(zip) { runCatching { EpubBook.chapterPaths(zip) }.getOrDefault(emptyList()) }
-    var chapter by rememberSaveable(file.path) { mutableIntStateOf(0) }
+private fun rememberEpub(file: File): OpenEpub {
+    val epub = remember(file) {
+        val zip = ZipFile(file)
+        OpenEpub(zip, runCatching { EpubBook.chapterPaths(zip) }.getOrDefault(emptyList()))
+    }
+    DisposableEffect(epub) { onDispose { runCatching { epub.zip.close() } } }
+    return epub
+}
+
+@SuppressLint("ClickableViewAccessibility") // taps still reach the WebView; this only listens
+@Composable
+private fun EpubReader(
+    epub: OpenEpub,
+    chapter: Int,
+    onChapter: (Int) -> Unit,
+    dark: Boolean,
+    scale: Float,
+    paper: Color,
+    onTap: () -> Unit,
+    onScroll: () -> Unit,
+    modifier: Modifier,
+) {
+    val chapters = epub.chapters
     val state = remember { EpubState() }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    val tap by rememberUpdatedState(onTap)
+    val scroll by rememberUpdatedState(onScroll)
+    val chapterChanged by rememberUpdatedState(onChapter)
 
     if (chapters.isEmpty()) {
         Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text("This book has no readable chapters.", color = ink)
+            Text("This book has no readable chapters.")
         }
         return
     }
@@ -341,50 +484,38 @@ private fun EpubReader(file: File, dark: Boolean, scale: Float, paper: Color, in
         if (state.currentPath != path) view.loadUrl(bookUrl(path))
     }
 
-    Column(modifier.fillMaxWidth()) {
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            factory = { context ->
-                WebView(context).apply {
-                    // Only the book itself: no scripts, no files, no network.
-                    settings.javaScriptEnabled = false
-                    settings.allowFileAccess = false
-                    settings.allowContentAccess = false
-                    webViewClient = BookClient(zip, state) { path ->
-                        chapters.indexOf(path).takeIf { it >= 0 }?.let { chapter = it }
-                    }
-                    webView = this
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                // Only the book itself: no scripts, no files, no network.
+                settings.javaScriptEnabled = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                webViewClient = BookClient(epub.zip, state) { path ->
+                    chapters.indexOf(path).takeIf { it >= 0 }?.let { chapterChanged(it) }
                 }
-            },
-            update = { view ->
-                view.settings.textZoom = (scale * 100).toInt()
-                view.setBackgroundColor(paper.toArgb())
-            },
-            onRelease = { it.destroy() },
-        )
-        HorizontalDivider(color = ink.copy(alpha = 0.15f))
-        Row(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = { chapter-- }, enabled = chapter > 0) {
-                Icon(Icons.AutoMirrored.Filled.NavigateBefore, contentDescription = null)
-                Text("Previous")
+                // A single tap shows or hides the bars; scrolling hides them.
+                val taps = GestureDetector(
+                    context,
+                    object : GestureDetector.SimpleOnGestureListener() {
+                        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                            tap()
+                            return false
+                        }
+                    },
+                )
+                setOnTouchListener { _, event -> taps.onTouchEvent(event); false }
+                setOnScrollChangeListener { _, _, y, _, oldY -> if (abs(y - oldY) > 2) scroll() }
+                webView = this
             }
-            Text(
-                "Chapter ${chapter + 1} of ${chapters.size}",
-                style = MaterialTheme.typography.labelLarge,
-                color = ink,
-                modifier = Modifier.weight(1f),
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            TextButton(onClick = { chapter++ }, enabled = chapter < chapters.lastIndex) {
-                Text("Next")
-                Spacer(Modifier.width(2.dp))
-                Icon(Icons.AutoMirrored.Filled.NavigateNext, contentDescription = null)
-            }
-        }
-    }
+        },
+        update = { view ->
+            view.settings.textZoom = (scale * 100).roundToInt()
+            view.setBackgroundColor(paper.toArgb())
+        },
+        onRelease = { it.destroy() },
+    )
 }
 
 private fun bookUrl(path: String) = "https://$BOOK_HOST/" + path.split('/').joinToString("/") { Uri.encode(it) }
@@ -449,7 +580,7 @@ private class BookClient(
             "gif" to "image/gif", "svg" to "image/svg+xml", "webp" to "image/webp",
             "ttf" to "font/ttf", "otf" to "font/otf", "woff" to "font/woff", "woff2" to "font/woff2",
         )
-        const val BASE_CSS = "body{margin:0 auto !important;padding:20px 22px 56px !important;max-width:42em;" +
+        const val BASE_CSS = "body{margin:0 auto !important;padding:20px 22px 120px !important;max-width:42em;" +
             "line-height:1.65 !important;word-wrap:break-word}img,svg{max-width:100% !important;height:auto !important}"
         const val LIGHT_CSS = "$BASE_CSS html,body{background:#FBF8F3 !important;color:#1D1B20 !important}"
         const val DARK_CSS = "$BASE_CSS html,body{background:#121212 !important;color:#E6E1E5 !important}" +

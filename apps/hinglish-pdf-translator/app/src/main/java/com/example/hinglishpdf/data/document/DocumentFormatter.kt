@@ -18,7 +18,7 @@ object DocumentFormatter {
             val prevIsList = previous?.kind == BlockKind.BULLET || previous?.kind == BlockKind.NUMBERED
             if (out.isNotEmpty()) {
                 // List items sit on consecutive lines; everything else gets a blank line.
-                out.append(if (isList && prevIsList) "\n" else "\n\n")
+                out.append(if ((isList && prevIsList) || block.lineBreak) "\n" else "\n\n")
             }
             out.append(
                 when (block.kind) {

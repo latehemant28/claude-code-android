@@ -42,6 +42,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
+/** The three bottom tabs. */
+enum class AppTab { TRANSLATE, LIBRARY, SETTINGS }
+
 data class TranslatorUiState(
     /** The AI provider picked in the app, with each provider's key and model. */
     val providers: ProviderSettings.State,
@@ -389,6 +392,13 @@ class TranslatorViewModel(
     /** The "AI provider & API key" sheet (status banner, menu, or Translate without a key). */
     val providerSheet: StateFlow<Boolean> = saved.getStateFlow(KEY_PROVIDER_SHEET, false)
 
+    /** The bottom tab on screen (kept through process death, like the sheets). */
+    val tab: StateFlow<Int> = saved.getStateFlow(KEY_TAB, AppTab.TRANSLATE.ordinal)
+
+    fun selectTab(tab: AppTab) {
+        saved[KEY_TAB] = tab.ordinal
+    }
+
     /** The in-app "Get API Key" browser, opened from that sheet. */
     val keyBrowser: StateFlow<Boolean> = saved.getStateFlow(KEY_KEY_BROWSER, false)
 
@@ -426,6 +436,7 @@ class TranslatorViewModel(
         const val KEY_PROVIDER_SHEET = "provider_sheet"
         const val KEY_KEY_BROWSER = "key_browser"
         const val KEY_READER = "reader"
+        const val KEY_TAB = "tab"
 
         val Factory = viewModelFactory {
             initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp, createSavedStateHandle()) }

@@ -126,6 +126,7 @@ class PdfExporter(private val fonts: BundledFonts, private val language: Languag
         val prevIsList = previous?.kind == BlockKind.BULLET || previous?.kind == BlockKind.NUMBERED
         val spaceBefore = when {
             previous == null -> BODY_SIZE * 0.5f
+            block.lineBreak -> 0f // the next line of the same paragraph (<br/>)
             block.kind == BlockKind.HEADING -> paint.textSize * 0.9f
             isList && prevIsList -> BODY_SIZE * 0.3f
             else -> BODY_SIZE * 0.75f

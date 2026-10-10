@@ -146,8 +146,13 @@ class FallbackTranslatorTest {
 
     @Test
     fun `a model typed in the app is tried first`() {
-        assertEquals(listOf("gpt-x", "gpt-4.1-mini", "gpt-4o-mini", "gpt-5-mini"), AIProvider.OPENAI.models(" gpt-x "))
+        assertEquals(listOf("gpt-x", "gpt-4o-mini", "gpt-4.1-mini", "gpt-5-mini"), AIProvider.OPENAI.models(" gpt-x "))
         assertEquals(AIProvider.OPENAI.defaultModels, AIProvider.OPENAI.models(""))
+        // Zero-config: the fast, low-cost models first.
+        assertEquals("gemini-1.5-flash", AIProvider.GEMINI.defaultModels.first())
+        assertEquals("llama-3.3-70b-versatile", AIProvider.GROQ.defaultModels.first())
+        assertEquals("gpt-4o-mini", AIProvider.OPENAI.defaultModels.first())
+        assertEquals("claude-3-haiku-20240307", AIProvider.ANTHROPIC.defaultModels.first())
         assertEquals(AIProvider.GROQ.defaultModels, AIProvider.GROQ.models("llama-3.3-70b-versatile")) // no duplicate
     }
 

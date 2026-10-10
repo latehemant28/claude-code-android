@@ -23,7 +23,7 @@ class TranslationRepositoryTest {
 
     /**
      * Stands in for Gemini: translates each Markdown block of the chunk to
-     * "HI(text)", keeping its marker. [script] can make a given request
+     * [hi] of it, keeping its marker. [script] can make a given request
      * (1-based) misbehave.
      */
     private class FakeGemini(private val script: (request: Int, blocks: Int) -> Fault = { _, _ -> Fault.NONE }) :
@@ -37,7 +37,7 @@ class TranslationRepositoryTest {
             val blocks = chunk.split("\n\n")
             val out = blocks.map { block ->
                 val marker = Regex("^(#+ |\\s*- |\\s*\\d+\\. )?").find(block)!!.value
-                marker to "HI(${block.removePrefix(marker)})"
+                marker to hi(block.removePrefix(marker))
             }.toMutableList()
             when (script(prompts.size, blocks.size)) {
                 Fault.RATE_LIMIT -> throw TranslatorException.Transient("Gemini rate limit reached", retryAfterMillis = 20_000, rateLimited = true)
@@ -48,6 +48,12 @@ class TranslationRepositoryTest {
                 Fault.MERGES_PARAGRAPHS -> {
                     out[1] = "" to out[1].second + " " + out[2].second
                     out.removeAt(2)
+                }
+                Fault.COPIES_SECOND -> out[1] = out[1].first to blocks[1] // left in English
+                Fault.EMPTY_SECOND -> out[1] = out[1].first to ""
+                Fault.TRUNCATED -> {
+                    emit(out.first().first + out.first().second.take(8))
+                    throw TranslatorException.Truncated("Gemini's answer reached its length limit")
                 }
                 Fault.NONE -> Unit
             }
@@ -60,7 +66,17 @@ class TranslationRepositoryTest {
         }
     }
 
-    private enum class Fault { NONE, RATE_LIMIT, DAILY_QUOTA, BLOCKED, BAD_KEY, DEVANAGARI_IN_LAST, MERGES_PARAGRAPHS }
+    private enum class Fault {
+        NONE, RATE_LIMIT, DAILY_QUOTA, BLOCKED, BAD_KEY, DEVANAGARI_IN_LAST, MERGES_PARAGRAPHS,
+        COPIES_SECOND, EMPTY_SECOND, TRUNCATED,
+    }
+
+    private companion object {
+        /** The fake "translation": each Latin letter swapped for a Devanagari one. */
+        fun hi(text: String) = "HI(" + text.map { c ->
+            if (c.lowercaseChar() in 'a'..'z') 'क' + (c.lowercaseChar() - 'a') else c
+        }.joinToString("") + ")"
+    }
 
     private val page = listOf(
         DocBlock(BlockKind.HEADING, "Chapter 4", level = 1),
@@ -71,7 +87,7 @@ class TranslationRepositoryTest {
         DocBlock(BlockKind.CODE, "x = 1"),
     )
     private val expected = listOf(
-        "HI(Chapter 4)", "HI(It was a cold morning.)", "HI(Everyone was late.)", "HI(Bring a coat)", "HI(Leave early)", null,
+        hi("Chapter 4"), hi("It was a cold morning."), hi("Everyone was late."), hi("Bring a coat"), hi("Leave early"), null,
     )
 
     private fun TestScope.repository(gemini: FakeGemini) =
@@ -230,5 +246,64 @@ class TranslationRepositoryTest {
         assertEquals(4_000L, com.example.hinglishpdf.data.ai.AIProvider.GEMINI.chunkPauseMillis)
         assertEquals(2_000L, com.example.hinglishpdf.data.ai.AIProvider.GROQ.chunkPauseMillis)
         com.example.hinglishpdf.data.ai.AIProvider.entries.forEach { assertEquals(60_000L, it.rateLimitWaitMillis) }
+    }
+
+    // ------------------------------------------------- 100% translation
+
+    private val story = listOf(
+        DocBlock(BlockKind.HEADING, "32 Historical examples", level = 2),
+        DocBlock(BlockKind.PARAGRAPH, "The first example comes from Rome, where the senate met every morning to argue."),
+        DocBlock(BlockKind.PARAGRAPH, "The second example is from Athens."),
+    )
+
+    @Test
+    fun `text the AI left in english mid-page is sent again, strictly`() = runTest {
+        val gemini = FakeGemini { request, _ -> if (request == 1) Fault.COPIES_SECOND else Fault.NONE }
+        val events = repository(gemini).translatePage(story).toList()
+
+        assertEquals(2, gemini.prompts.size)
+        assertEquals(story[1].text, gemini.prompts[1]) // only the untranslated block
+        assertTrue(gemini.systemPrompts[1].contains("translate ALL of it into Hindi"))
+        assertEquals(PageEvent.PageFinished(story.map { hi(it.text) }), events.last())
+    }
+
+    @Test
+    fun `a block the AI left empty is translated, never blank`() = runTest {
+        val gemini = FakeGemini { request, _ -> if (request == 1) Fault.EMPTY_SECOND else Fault.NONE }
+        val events = repository(gemini).translatePage(story).toList()
+        assertEquals(PageEvent.PageFinished(story.map { hi(it.text) }), events.last())
+    }
+
+    @Test
+    fun `an answer cut off at the length limit is redone in parts`() = runTest {
+        // The whole page, then its halves: the first half is cut off too, so it
+        // is halved again; nothing is kept half-done or in English.
+        val gemini = FakeGemini { request, blocks -> if (request <= 2 && blocks > 1) Fault.TRUNCATED else Fault.NONE }
+        val events = repository(gemini).translatePage(story).toList()
+        assertEquals(PageEvent.PageFinished(story.map { hi(it.text) }), events.last())
+    }
+
+    @Test
+    fun `a long paragraph cut off on its own is translated sentence by sentence`() = runTest {
+        val paragraph = "The senate met every morning to argue about the war. " +
+            "Nobody agreed on anything at all. The consuls left the city in anger."
+        val gemini = FakeGemini { request, _ -> if (request == 1) Fault.TRUNCATED else Fault.NONE }
+        val events = repository(gemini).translatePage(listOf(DocBlock(BlockKind.PARAGRAPH, paragraph))).toList()
+
+        // The paragraph, then its parts, split between sentences.
+        val parts = gemini.prompts.drop(1)
+        assertTrue(parts.size >= 2)
+        assertEquals(paragraph, parts.joinToString(" "))
+        assertEquals(PageEvent.PageFinished(listOf(parts.joinToString(" ") { hi(it) })), events.last())
+    }
+
+    @Test
+    fun `every request asks for 100 percent of the text, block for block`() = runTest {
+        val gemini = FakeGemini()
+        repository(gemini).translatePage(story).toList()
+        val system = gemini.systemPrompts.single()
+        assertTrue(system.startsWith(TranslationPrompt.TEMPLATE.substringBefore("{sourceLanguage}")))
+        assertTrue(system.contains("Never stop early and never leave a sentence in the original language."))
+        assertTrue(system.contains("Never merge two blocks or split one"))
     }
 }

@@ -202,18 +202,27 @@ object EpubBook {
         }
         val run = mutableListOf<Node>()
         var runIndex = 0
+        var afterBreak = false
         fun flush() {
             val text = run.joinToString("") { textOf(it) }.replace(WHITESPACE, " ").trim()
             if (text.isNotEmpty()) {
-                out += TextRun(blockFor(element, text, firstRun = runIndex == 0), run.toList())
+                val block = blockFor(element, text, firstRun = runIndex == 0)
+                out += TextRun(if (afterBreak && runIndex > 0) block.copy(lineBreak = true) else block, run.toList())
                 runIndex++
             }
+            afterBreak = false
             run.clear()
         }
         for (child in element.childNodes()) {
             if (child is Element) {
                 val tag = child.localName()
                 when {
+                    // A manual line break: each line is translated on its own and
+                    // keeps its own line; the <br/> stays where it is.
+                    tag == "br" -> {
+                        flush()
+                        afterBreak = true
+                    }
                     tag in SKIP_TAGS -> run += child // kept in place, contributes no text
                     tag in BLOCK_TAGS -> {
                         flush()

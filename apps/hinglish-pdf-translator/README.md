@@ -26,24 +26,33 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
   Key** opens the provider's own key page inside the app; copy a key there,
   close it, and the key is pasted for you.
 - **PDF or EPUB output:** an **Output Format: [ PDF | EPUB ]** toggle (EPUB
-  by default) decides what **Save to Downloads** writes, whatever the source.
+  by default) decides what **Export** (to Downloads) writes, whatever the source.
 - **Structure kept:** headings, bullet points (with nesting), numbering and
   paragraph breaks are restored after translation.
 - **Model fallback:** a prioritized list of models per provider; a retired,
   out-of-quota or rate-limited model is swapped for the next one automatically.
-- **Clean main screen:** a one-line AI status banner, From / To, Output
-  Format and, right below, the big **Translate a book** card; provider, key
-  and model live in a settings sheet.
-- **In-app reader:** **Read Now** on a finished book opens it inside the app
-  (PDF pages with `PdfRenderer`, EPUB chapters in a local WebView) with dark
-  mode and text size / zoom.
+- **Three tabs:** **Translate** (the dashboard, titled **Bring your own
+  key**), **Library** and **Settings**, in a deep indigo / slate Material 3
+  theme with violet-to-pink accent gradients, light or dark with the phone.
+- **Dashboard:** the BYOK badge, the active **AI engine** card (status
+  light, model badge, chevron), pill-shaped From / To and PDF / EPUB
+  selectors, and the gradient **Select PDF / EPUB** button; below, the book
+  being translated, live.
+- **Library:** every book as a card with a progress bar and **Read**,
+  **Export** and **Delete**, plus a live preview of the translated pages.
+- **In-app reader:** opens a finished book inside the app (PDF pages with
+  `PdfRenderer`, EPUB chapters in a local WebView), edge to edge, with bars
+  that hide while you read, dark mode and gliding text size / zoom.
+- **Layout fidelity:** the translation keeps the source's headings,
+  paragraphs, line breaks, lists and quotes, block for block; every block is
+  checked, and anything missing, cut off or left untranslated is sent again.
 - **Reading UI:** Devanagari fonts from Google Fonts (Mukta, Noto Serif
   Devanagari, Kalam) and an **Aa** sheet for font style and text size.
 - **Background and crash-proof:** a foreground service with a "Translating
   page 45 of 300..." notification; every page is saved to Room the moment it
   is done, and a restart resumes at the first untranslated page.
 - **Terms of Use:** a disclaimer that must be accepted before the first
-  translation, and always available from the ⋮ menu.
+  translation, and always available in **Settings**.
 - **Small:** ~7.7 MB APK, including the embedded Noto fonts and Lottie.
 
 Tech: Kotlin, Jetpack Compose (Material 3, downloadable Google Fonts), the
@@ -57,10 +66,11 @@ Android's `PdfDocument` for writing PDFs, and `java.util.zip` for EPUBs.
 
 ## Setup: pick a provider and add its API key
 
-The banner at the top of the main screen shows the AI engine in use
-("🤖 Using: Groq"), or, with no key saved, a highlighted **⚠️ API Key
-Required - Tap to Configure**. Tapping it (or ⋮ → **AI provider & API key**,
-or **Select PDF / EPUB** without a key) opens the settings sheet:
+The **AI engine** card at the top of the dashboard shows the provider in
+use with a green "Connected" light and the model in a badge, or, with no key
+saved, an amber **⚠️ API Key Required - Tap to Configure**. Tapping it (or a
+provider under **Settings → Choose Your AI Engine**, or **Select PDF / EPUB**
+without a key) opens the settings sheet:
 
 1. **AI provider** dropdown: Google Gemini, OpenAI, Anthropic Claude or Groq.
 2. **Get API Key** opens that provider's official key dashboard in an in-app
@@ -179,9 +189,13 @@ Each provider has a prioritized list (`AIProvider.defaultModels`):
 | Provider | Models, in order |
 |---|---|
 | Gemini | `gemini-1.5-flash`, `gemini-1.5-pro` (both retired by Google on 29 Sept 2025), `gemini-3.5-flash-lite`, `gemini-3.8-flash` |
-| OpenAI | `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-5-mini` |
-| Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` |
+| OpenAI | `gpt-4o-mini`, `gpt-4.1-mini`, `gpt-5-mini` |
+| Anthropic | `claude-3-haiku-20240307` (retired by Anthropic on 19 Apr 2026), `claude-haiku-5-5`, `claude-haiku-4-5`, `claude-sonnet-5-5` |
 | Groq | `llama-3.3-70b-versatile`, `openai/gpt-oss-120b` |
+
+Each list starts with the fast, low-cost model picked for zero-config use.
+A retired first model costs one failed request per app session (it answers
+"not found" and is skipped from then on), so translation never depends on it.
 
 A model typed in the app's Model field is tried first. `FallbackTranslator`
 tries them in order and moves on silently when a model fails in a way
@@ -292,8 +306,14 @@ English otherwise.
 
 Both show by themselves only on the very first launch (flags written in
 SharedPreferences the moment they appear; people updating see them once).
-The tour can be replayed from ⋮ → **Show the tutorial**. The main screen
-always starts with the **BYOK Model - 100% Free & Private Translation** badge.
+The tour can be replayed from the **?** in the dashboard's top bar or from
+**Settings → Show the tutorial**. The dashboard always starts with the
+**BYOK Model - 100% Free & Private Translation** badge.
+
+All illustrations on screen (the badge, the AI engine chip in **Choose Your
+AI Engine**, the spotlight's dimmed layer with its cut-out) are drawn with
+Compose shapes and gradients, and the Lottie animations render in software
+mode, so nothing depends on a GPU path that could show a black box.
 
 The key guides (`res/raw/key_guide_<provider>.json`, 15 s) and the success
 check (`key_saved.json`) are generated the same way by
@@ -309,7 +329,8 @@ frames of each to check they parse and draw.
 
 ### In-app reader
 
-A finished book shows **Read Now** next to **Save to Downloads**. It writes a
+A finished book shows **Read** in the Library (and **Read Now** on the
+dashboard's latest-book card). It writes a
 private reading copy in the selected output format (app cache, replaced each
 time) and opens [`BookReaderScreen`](app/src/main/java/com/example/hinglishpdf/ui/reader/BookReaderScreen.kt):
 
@@ -317,9 +338,14 @@ time) and opens [`BookReaderScreen`](app/src/main/java/com/example/hinglishpdf/u
 - **EPUB:** chapters in reading order in a local WebView with Previous / Next.
   Files are served straight from the EPUB (`https://book.local/...`), with
   scripts, file access and network access off; links never leave the app.
+- **Clutter-free:** the book fills the screen. The top bar (back, title,
+  dark mode, **Aa**) and the bottom bar (chapter navigation) slide away as
+  soon as you scroll; a tap on the page brings them back, and they hide again
+  after a few seconds.
 - **Controls:** a dark mode toggle (PDF pages are inverted, EPUB text gets a
-  dark stylesheet) and an **Aa** panel with a text size (EPUB) or zoom (PDF)
-  slider. Both are remembered.
+  dark stylesheet) and an **Aa** panel with **A−**, a slider and **A+** for
+  text size (EPUB) or zoom (PDF); the size glides to each new value. Both
+  are remembered.
 
 The "finished" notification also opens the app instead of an external viewer.
 
@@ -352,10 +378,40 @@ Speaker labels such as "YOUTH:" are part of the text and stay.
   drops the `-`.
 - **Count doesn't match** (merged or split paragraphs): nothing is guessed.
   The chunk is translated again in two halves, recursively, until it lines up.
-- **A block comes back empty:** it is retried on its own.
-- **The AI refuses some text** (or it is too long for one request): it is
-  split, and text that is still refused stays in English instead of stopping
-  the book.
+- **Every block is checked** ([`TranslationCheck`](app/src/main/java/com/example/hinglishpdf/data/translate/TranslationCheck.kt)):
+  empty, far too short for the original (cut off part-way), or still in the
+  source language (the whole block, or 8 or more words copied unchanged, as
+  when an answer falls back to English under a heading). Those blocks are
+  sent again together, with a strict reminder to translate all of it; what
+  is still missing or cut short is then translated sentence by sentence.
+  Short blocks (names, "Index", "Chapter 3") are not second-guessed.
+- **An answer cut off by the model's length limit** (Gemini `MAX_TOKENS`,
+  OpenAI / Groq `length`, Claude `max_tokens`) is never kept: the chunk is
+  redone in halves, and a single long paragraph in parts.
+- **The AI refuses some text**: it is split, and text that is still refused
+  stays in the original language instead of stopping the book.
+
+Every request carries an **output contract** after the translation prompt:
+translate 100% of the text, answer with exactly the same blocks in the same
+order, and keep short blocks (headings, chapter titles) as their own block.
+
+### Reading the source faithfully
+
+- **No false blank pages (PDF):** each page's text is assigned to that page
+  by number. PDFBox skips a page with no content stream, which used to shift
+  every later page's text one page early and leave a page with a heading or
+  chapter title looking blank.
+- **Running headers and footers** repeated on many pages are dropped, but
+  never a line set larger than the body text (a chapter title at the top of
+  its opening page often repeats the running header) and never the only text
+  of a page.
+- **Paragraphs stay separate (PDF):** besides spacing and first-line indents,
+  a finished sentence on a line that stops well short of the right edge ends
+  its paragraph, so books with block paragraphs, dialogue and one-line
+  paragraphs are not merged.
+- **Line breaks (EPUB):** each line before a `<br/>` (verse, addresses) is its
+  own block, translated in place with the `<br/>` kept, and shown on its own
+  line in the preview, the PDF export and plain text.
 
 ### Limits and errors
 
@@ -395,8 +451,8 @@ collects it on the main thread.
 
 ### Export: PDF or EPUB
 
-The **Output Format: [ PDF | EPUB ]** toggle at the top of the screen (EPUB
-by default) decides what **Save to Downloads**, and the automatic save when a
+The **Output Format: ( PDF | EPUB )** toggle on the dashboard and in Settings (EPUB
+by default) decides what **Export** (in the Library), and the automatic save when a
 book finishes, write. Files go to **Downloads** through MediaStore, which
 needs no storage permission on Android 10+ (this app's minimum). Pages not
 translated yet keep their original text, so a paused book can be saved too.
@@ -426,7 +482,7 @@ older version), the **Terms of Use** dialog appears with this disclaimer:
 agree to these Terms of Use". **Not now** closes the dialog and nothing is
 translated. The acceptance (with its date) is saved on the phone; the
 background service also refuses to run a book until it is given. The text is
-always available from the ⋮ menu → **Terms of Use & Disclaimer**, and a link
+always available in **Settings → Terms of Use & Disclaimer**, and a link
 under "Select PDF / EPUB".
 
 ## Project structure
@@ -457,11 +513,15 @@ app/
         │   ├── epub/                     EpubBook (read, translated copy), EpubWriter (new EPUB 3)
         │   ├── document/                 Import, blocks, PDF export (PdfExporter, PdfPaginator, BundledFonts)
         │   ├── export/BookExporter.kt    Writes the result to Downloads via MediaStore
-        │   └── translate/BlockChunker.kt Page → chunks of whole blocks
-        └── ui/                           Compose screen + ViewModel, language card, status banner +
-                                          provider settings sheet, in-app key browser, Terms dialog;
-                                          FirstLaunch (BYOK badge, language popup, spotlight tour);
-                                          reader/ = in-app reader, fonts + Aa sheet
+        │   └── translate/                BlockChunker (page → chunks of whole blocks),
+        │                                 TranslationCheck (missing / cut-off / untranslated blocks)
+        └── ui/                           TranslatorScreen (tabs, top bar, sheets) + ViewModel;
+                                          DashboardTab, LibraryTab, SettingsTab, Components (cards,
+                                          gradient button, pill toggle, progress); language card,
+                                          AI engine card + provider settings sheet, in-app key browser,
+                                          Terms dialog; FirstLaunch (BYOK badge, language popup,
+                                          spotlight tour); theme/ = indigo / slate palette and
+                                          gradients; reader/ = in-app reader, fonts + Aa sheet
 tools/lottie_kit.py                     Helpers for writing Lottie JSON from code
 tools/key_guide_lottie.py               Generates res/raw/key_guide_*.json and key_saved.json
 ```

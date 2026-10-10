@@ -9,10 +9,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.ui.graphics.compositeOver
+import com.example.hinglishpdf.ui.theme.brand
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.rememberModalBottomSheetState
 import android.view.ViewTreeObserver
 import androidx.compose.runtime.DisposableEffect
@@ -61,9 +63,10 @@ import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.settings.ProviderSettings
 
 /**
- * The compact banner on the main screen: "🤖 Using: Groq", or, with no key
- * saved, a highlighted "⚠️ API Key Required - Tap to Configure". Tapping it
- * opens [ProviderSettingsSheet].
+ * The active AI engine, front and centre on the dashboard: the provider with
+ * a status light ("Connected" or a highlighted "⚠️ API Key Required - Tap to
+ * Configure"), the model in a badge, and a chevron. Tapping it opens
+ * [ProviderSettingsSheet].
  */
 @Composable
 fun ApiStatusBanner(
@@ -73,32 +76,63 @@ fun ApiStatusBanner(
     modifier: Modifier = Modifier,
 ) {
     val configured = settings.configured
-    val container = if (configured) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
-    val content = if (configured) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onErrorContainer
-    Surface(
+    val provider = settings.provider
+    val brand = MaterialTheme.brand
+    SectionCard(
+        modifier = modifier,
         onClick = onClick,
-        shape = RoundedCornerShape(16.dp),
-        color = container,
-        contentColor = content,
-        modifier = modifier.fillMaxWidth(),
+        // No key yet: a warm amber wash rather than an error red, in light and dark alike.
+        color = if (configured) {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        } else {
+            brand.warning.copy(alpha = 0.16f).compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
+        },
     ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            GradientIcon(Icons.Filled.Memory, size = 48.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    if (configured) "🤖 Using: ${settings.provider.displayName}" else "⚠️ API Key Required - Tap to Configure",
-                    style = MaterialTheme.typography.titleSmall,
+                    "AI ENGINE",
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
                 )
-                if (configured && activeModel != null) {
-                    Text(activeModel.substringAfter(" · "), style = MaterialTheme.typography.bodySmall)
-                } else if (!configured) {
-                    Text("Choose an AI provider and add its key", style = MaterialTheme.typography.bodySmall)
+                if (configured) {
+                    Text(provider.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(brand.success)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Connected", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(8.dp))
+                        InfoBadge(
+                            activeModel?.substringAfter(" · ")
+                                ?: settings.customModel(provider).ifBlank { "Auto · ${provider.defaultModels.first()}" },
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                } else {
+                    Text(
+                        "⚠️ API Key Required - Tap to Configure",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(brand.warning)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Choose an AI provider and add its key",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
-            Icon(Icons.Filled.ChevronRight, contentDescription = null)
+            Icon(
+                Icons.Filled.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

@@ -30,8 +30,8 @@ android {
         // Android 10+: MediaStore saves to Downloads without any storage permission.
         minSdk = 29
         targetSdk = 35
-        versionCode = 12
-        versionName = "6.1"
+        versionCode = 13
+        versionName = "7.0"
 
         // Quotes and backslashes escaped so any key is a valid Java string literal.
         val escapedKey = geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")

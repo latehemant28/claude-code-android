@@ -43,7 +43,11 @@ class TranslationPromptTest {
     @Test
     fun `the languages are filled in`() {
         val prompt = TranslationPrompt.system(Language.ENGLISH, Language.SPANISH)
-        assertEquals(specified.replace("{sourceLanguage}", "English").replace("{targetLanguage}", "Spanish"), prompt)
+        // The specified prompt, word for word, then the output contract.
+        assertTrue(prompt.startsWith(specified.replace("{sourceLanguage}", "English").replace("{targetLanguage}", "Spanish") + "\n\nOUTPUT CONTRACT:"))
+        assertTrue(prompt.contains("Translate every heading, sentence, list item and quotation into Spanish"))
+        assertTrue(!prompt.contains("IMPORTANT: An earlier answer"))
+        assertTrue(TranslationPrompt.system(Language.ENGLISH, Language.SPANISH, strict = true).endsWith("answer with the same blocks."))
         assertTrue(prompt.contains("Translate the following text from English to Spanish."))
         assertTrue(prompt.contains("educated native speakers of Spanish converse"))
         assertTrue(!prompt.contains("{"))

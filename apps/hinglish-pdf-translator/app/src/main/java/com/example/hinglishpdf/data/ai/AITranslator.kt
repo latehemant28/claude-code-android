@@ -49,6 +49,12 @@ sealed class TranslatorException(message: String, cause: Throwable? = null) : Ex
     /** The provider refused this text (safety filter), or it is too long for one request. */
     class Blocked(message: String, cause: Throwable? = null) : TranslatorException(message, cause)
 
+    /**
+     * The answer reached the model's output limit before the text was
+     * finished: the text is translated again in smaller parts, never kept cut off.
+     */
+    class Truncated(message: String) : TranslatorException(message)
+
     /** Bad API key, no credit, unsupported region, no usable model: retrying cannot help. */
     class Fatal(message: String, cause: Throwable? = null) : TranslatorException(message, cause)
 }
@@ -99,9 +105,9 @@ class FallbackTranslator(
                 _activeModel.value = name
                 return@flow
             } catch (e: TranslatorException) {
-                // A refusal stays a refusal (the text is kept in English); any
-                // other failure after text arrived is retried from scratch.
-                if (started && e !is TranslatorException.Blocked) {
+                // A refusal stays a refusal, and a cut-off answer is redone in smaller
+                // parts; any other failure after text arrived is retried from scratch.
+                if (started && e !is TranslatorException.Blocked && e !is TranslatorException.Truncated) {
                     throw TranslatorException.Transient("$providerName stopped mid-answer", null, e)
                 }
                 when {

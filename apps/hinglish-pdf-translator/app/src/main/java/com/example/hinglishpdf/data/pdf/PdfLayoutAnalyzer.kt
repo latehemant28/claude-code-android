@@ -19,13 +19,17 @@ data class PdfLine(
     val fontSize: Float,
     val bold: Boolean,
     val pageHeight: Float,
+    /** Where the line's last glyph ends (0 = unknown). */
+    val right: Float = 0f,
 )
 
 /**
  * Rebuilds document structure from positioned lines: headings (by font size
  * and weight), bulleted and numbered list items (with nesting from their
- * indentation), and paragraphs (by vertical spacing). Running headers,
- * footers and page numbers are dropped.
+ * indentation), and paragraphs (by vertical spacing, first-line indents and
+ * short last lines). Running headers, footers and page numbers are dropped,
+ * but never a heading-sized line (a chapter title at the top of its first
+ * page) and never the only text of a page.
  *
  * PDFs have no real structure, so this is a heuristic; it is pure Kotlin so
  * it can be unit-tested on the JVM.
@@ -63,7 +67,9 @@ object PdfLayoutAnalyzer {
     }
 
     private fun analyzeWithPages(rawLines: List<PdfLine>, splitPages: Boolean): List<Pair<Int, DocBlock>> {
-        val lines = dropRunningHeadersAndFooters(rawLines.filter { it.text.isNotBlank() })
+        val nonBlank = rawLines.filter { it.text.isNotBlank() }
+        if (nonBlank.isEmpty()) return emptyList()
+        val lines = dropRunningHeadersAndFooters(nonBlank, dominantFontSize(nonBlank))
         if (lines.isEmpty()) return emptyList()
 
         val bodySize = dominantFontSize(lines)
@@ -74,6 +80,7 @@ object PdfLayoutAnalyzer {
         val blocks = mutableListOf<Pair<Int, DocBlock>>()
         var current: Classified? = null // first line of the block being built
         var previous: Classified? = null
+        var blockRight = 0f // the right edge of the block's lines so far
         val text = StringBuilder()
 
         fun flush() {
@@ -96,13 +103,14 @@ object PdfLayoutAnalyzer {
             }
             text.clear()
             current = null
+            blockRight = 0f
         }
 
         for (line in classified) {
             val prev = previous
             val pageBreak = splitPages && prev != null && prev.line.page != line.line.page
             val continues = !pageBreak && current != null && prev != null &&
-                continuesBlock(current!!, prev, line, bodySize)
+                continuesBlock(current!!, prev, line, bodySize, blockRight)
             if (!continues) {
                 flush()
                 current = line
@@ -110,6 +118,7 @@ object PdfLayoutAnalyzer {
             } else {
                 appendLine(text, line.text)
             }
+            blockRight = max(blockRight, line.line.right)
             previous = line
         }
         flush()
@@ -137,7 +146,13 @@ object PdfLayoutAnalyzer {
     }
 
     /** Whether [line] belongs to the block that started with [start] and last saw [prev]. */
-    private fun continuesBlock(start: Classified, prev: Classified, line: Classified, bodySize: Float): Boolean {
+    private fun continuesBlock(
+        start: Classified,
+        prev: Classified,
+        line: Classified,
+        bodySize: Float,
+        blockRight: Float,
+    ): Boolean {
         if (line.type == LineType.BULLET || line.type == LineType.NUMBERED) return false
 
         val lineHeight = max(prev.line.fontSize, line.line.fontSize).coerceAtLeast(1f)
@@ -159,9 +174,15 @@ object PdfLayoutAnalyzer {
                     return !SENTENCE_END.containsMatchIn(prev.text)
                 }
                 if (!tightGap) return false
-                // A first-line indent after a finished sentence starts a new paragraph.
+                if (!SENTENCE_END.containsMatchIn(prev.text)) return true
+                // A first-line indent after a finished sentence starts a new paragraph...
                 val indented = line.line.x > prev.line.x + bodySize * 1.5f
-                !(indented && SENTENCE_END.containsMatchIn(prev.text))
+                // ...and so does a finished sentence on a line that stops well short
+                // of the text's right edge: the last line of a paragraph (books
+                // without indents or extra spacing, dialogue, one-line paragraphs).
+                val edge = max(blockRight, line.line.right)
+                val shortLine = prev.line.right > 0f && edge - prev.line.right > bodySize * SHORT_LINE_EMS
+                !(indented || shortLine)
             }
         }
     }
@@ -214,23 +235,41 @@ object PdfLayoutAnalyzer {
                 depths
             }
 
-    /** Removes page numbers and text repeated in the top/bottom margin of many pages. */
-    private fun dropRunningHeadersAndFooters(lines: List<PdfLine>): List<PdfLine> {
+    /**
+     * Removes page numbers and text repeated in the top/bottom margin of many
+     * pages (running headers and footers). Kept anyway:
+     *  - a line set larger than the body text: a chapter title at the top of
+     *    its opening page often repeats the running header's wording;
+     *  - the text of a page that would otherwise be left with nothing but
+     *    its page number (a chapter title page, a short section).
+     */
+    private fun dropRunningHeadersAndFooters(lines: List<PdfLine>, bodySize: Float): List<PdfLine> {
         fun inMargin(l: PdfLine) = l.pageHeight > 0 && (l.y < l.pageHeight * 0.08f || l.y > l.pageHeight * 0.92f)
+        fun pattern(l: PdfLine) = l.text.trim().replace(DIGITS, "#")
+        fun headingSized(l: PdfLine) = l.fontSize >= bodySize * 1.15f
+        fun pageNumber(l: PdfLine) = inMargin(l) && PAGE_NUMBER.matches(l.text.trim()) && l.fontSize < bodySize * 1.3f
+
         val pages = lines.map { it.page }.distinct().size
         val repeated = if (pages >= 3) {
-            lines.filter(::inMargin)
-                .groupBy { it.text.trim().replace(Regex("\\d+"), "#") }
+            lines.filter { inMargin(it) && !headingSized(it) }
+                .groupBy(::pattern)
                 .filterValues { group -> group.map { it.page }.distinct().size >= max(3, pages / 2) }
                 .keys
         } else {
             emptySet()
         }
-        return lines.filterNot { l ->
-            val t = l.text.trim()
-            (inMargin(l) && PAGE_NUMBER.matches(t)) || (inMargin(l) && t.replace(Regex("\\d+"), "#") in repeated)
+        fun runningHeader(l: PdfLine) = inMargin(l) && !headingSized(l) && pattern(l) in repeated
+
+        return lines.groupBy { it.page }.values.flatMap { page ->
+            val kept = page.filterNot { pageNumber(it) || runningHeader(it) }
+            if (kept.isNotEmpty()) kept else page.filterNot(::pageNumber)
         }
     }
+
+    private val DIGITS = Regex("\\d+")
+
+    /** How far (in ems) a line must stop short of the right edge to count as a paragraph's last line. */
+    private const val SHORT_LINE_EMS = 5f
 
     private fun sizeKey(size: Float) = (size * 2).roundToInt() // half-point buckets
     private fun Float.toBucket() = (this / 4f).roundToInt()     // 4pt buckets for indentation

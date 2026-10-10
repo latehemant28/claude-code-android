@@ -184,6 +184,27 @@ class ProviderTranslatorsTest {
     }
 
     @Test
+    fun `an answer cut off at the length limit is reported, for every provider`() {
+        replies = { Reply(200, sse("""{"candidates":[{"content":{"parts":[{"text":"आधा"}]},"finishReason":"MAX_TOKENS"}]}""")) }
+        assertTrue(failure(gemini()) is TranslatorException.Truncated)
+
+        replies = { Reply(200, sse("""{"choices":[{"index":0,"delta":{"content":"आधा"},"finish_reason":"length"}]}""", "[DONE]")) }
+        assertTrue(failure(openAi()) is TranslatorException.Truncated)
+        assertTrue(failure(groq()) is TranslatorException.Truncated)
+
+        replies = {
+            Reply(
+                200,
+                sse(
+                    """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"आधा"}}""",
+                    """{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}""",
+                ),
+            )
+        }
+        assertTrue(failure(claude()) is TranslatorException.Truncated)
+    }
+
+    @Test
     fun `an unreadable stream is retried, not a book stop`() {
         replies = { Reply(200, sse("""{"candidates":[{"content":""", "not json")) }
         val e = failure(gemini())

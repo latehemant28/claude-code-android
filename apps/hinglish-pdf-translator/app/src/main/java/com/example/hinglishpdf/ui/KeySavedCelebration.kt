@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.airbnb.lottie.RenderMode
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
@@ -71,7 +72,12 @@ fun KeySavedCelebration(provider: AIProvider, onDone: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    LottieAnimation(composition = composition, progress = { progress }, modifier = Modifier.size(200.dp))
+                    LottieAnimation(
+                        composition = composition,
+                        progress = { progress },
+                        renderMode = RenderMode.SOFTWARE, // the same on every GPU: no black boxes
+                        modifier = Modifier.size(200.dp),
+                    )
                     Text(
                         KEY_SAVED_TITLE,
                         style = MaterialTheme.typography.headlineSmall,

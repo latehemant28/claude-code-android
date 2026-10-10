@@ -50,11 +50,23 @@ enum class Language(
     /** "Hindi · हिन्दी" for the dropdowns. */
     val label: String get() = if (nativeName == null) englishName else "$englishName · $nativeName"
 
+    /** Written in the Latin alphabet, like English (used to spot text left untranslated). */
+    val latinScript: Boolean
+        get() = this in LATIN_SCRIPT
+
+    /** Chinese, Japanese and Korean need far fewer characters than English for the same text. */
+    val compactScript: Boolean
+        get() = this == JAPANESE || this == KOREAN || this == CHINESE_SIMPLIFIED
+
     /** What the prompt says for {sourceLanguage} / {targetLanguage}. */
     val promptName: String
         get() = if (this == AUTO_DETECT) "its original language (detect it automatically)" else englishName
 
     companion object {
+        private val LATIN_SCRIPT = setOf(
+            ENGLISH, SPANISH, FRENCH, GERMAN, PORTUGUESE, ITALIAN, DUTCH, TURKISH, INDONESIAN, VIETNAMESE,
+        )
+
         /** "From": Auto-Detect first, then every language. */
         val sources: List<Language> = entries.toList()
 

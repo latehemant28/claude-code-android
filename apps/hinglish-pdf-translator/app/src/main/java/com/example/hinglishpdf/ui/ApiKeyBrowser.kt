@@ -84,6 +84,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.airbnb.lottie.RenderMode
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieClipSpec
 import com.airbnb.lottie.compose.LottieCompositionSpec
@@ -332,6 +333,7 @@ private fun HintStrip(provider: AIProvider, onHide: () -> Unit) {
         LottieAnimation(
             composition = composition,
             progress = { progress },
+            renderMode = RenderMode.SOFTWARE, // the same on every GPU: no black boxes
             modifier = Modifier
                 .height(150.dp)
                 .aspectRatio(400f / 260f)
@@ -356,6 +358,7 @@ fun VideoGuide(provider: AIProvider, modifier: Modifier = Modifier, onClose: () 
         LottieAnimation(
             composition = composition,
             progress = { player.progress },
+            renderMode = RenderMode.SOFTWARE,
             modifier = Modifier
                 .align(Alignment.Center)
                 .padding(horizontal = 12.dp, vertical = 28.dp)

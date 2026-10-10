@@ -70,6 +70,7 @@ class GeminiTranslator(
             ?.joinToString("")
         candidate.string("finishReason")?.let { reason ->
             if (reason in BLOCKED) throw TranslatorException.Blocked("Gemini stopped its answer ($reason)")
+            if (reason == "MAX_TOKENS") throw TranslatorException.Truncated("Gemini's answer reached its length limit")
         }
         return text
     }
