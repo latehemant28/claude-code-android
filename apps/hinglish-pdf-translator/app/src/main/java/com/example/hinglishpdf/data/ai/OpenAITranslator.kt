@@ -1,5 +1,6 @@
 package com.example.hinglishpdf.data.ai
 
+import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
@@ -15,7 +16,7 @@ open class ChatCompletionsTranslator(
     model: String,
 ) : HttpStreamingTranslator(providerName, model) {
 
-    override fun request(systemPrompt: String, chunk: String, temperature: Boolean) = Request(
+    override fun request(chunk: String, temperature: Boolean) = Request(
         url = endpoint,
         headers = mapOf("Authorization" to "Bearer $apiKey"),
         body = jsonObject {
@@ -23,7 +24,7 @@ open class ChatCompletionsTranslator(
             add(
                 "messages",
                 JsonArray().apply {
-                    add(message("system", systemPrompt))
+                    add(message("system", HinglishPrompt.SYSTEM_PROMPT))
                     add(message("user", chunk))
                 },
             )
@@ -35,9 +36,8 @@ open class ChatCompletionsTranslator(
     override fun textOf(event: JsonObject): String? {
         event.obj("error")?.let { throw classify(500, event.toString(), null) }
         val choice = event.firstOf("choices") ?: return null
-        when (choice.string("finish_reason")) {
-            "content_filter" -> throw TranslatorException.Blocked("$providerName declined this text (content filter)")
-            "length" -> throw TranslatorException.Truncated("$providerName's answer reached its length limit")
+        if (choice.string("finish_reason") == "content_filter") {
+            throw TranslatorException.Blocked("$providerName declined this text (content filter)")
         }
         return choice.obj("delta")?.string("content")
     }

@@ -1,12 +1,9 @@
 package com.example.hinglishpdf.ui
 
 import android.net.Uri
-import android.os.Bundle
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.hinglishpdf.HinglishApp
@@ -16,9 +13,7 @@ import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.document.DocFormat
-import com.example.hinglishpdf.data.llm.Language
 import com.example.hinglishpdf.data.settings.ProviderSettings
-import com.example.hinglishpdf.ui.reader.ReaderDocument
 import com.example.hinglishpdf.ui.reader.ReaderFont
 import com.example.hinglishpdf.ui.reader.ReaderStyle
 import com.example.hinglishpdf.service.LiveStatus
@@ -29,7 +24,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
@@ -40,14 +34,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.example.hinglishpdf.data.voice.Voice
-import com.example.hinglishpdf.ui.listen.ListenDocument
-import com.example.hinglishpdf.ui.listen.paragraphsOf
 import java.io.File
-
-/** The three bottom tabs. */
-enum class AppTab { TRANSLATE, LIBRARY, SETTINGS }
 
 data class TranslatorUiState(
     /** The AI provider picked in the app, with each provider's key and model. */
@@ -56,17 +43,12 @@ data class TranslatorUiState(
     val activeModel: String? = null,
     /** What "Save to Downloads" writes. */
     val outputFormat: DocFormat = DocFormat.EPUB,
-    /** "From" / "To" for the next book added. */
-    val sourceLanguage: Language = Language.AUTO_DETECT,
-    val targetLanguage: Language = Language.HINDI,
     /** When the Terms of Use were accepted; null until then (no translation may start). */
     val termsAcceptedAt: Long? = null,
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
     val importing: Boolean = false,
-    /** The book whose reading copy is being prepared ("Read Now"). */
-    val openingBookId: Long? = null,
     /** One-shot message for a snackbar. */
     val message: String? = null,
 ) {
@@ -80,10 +62,7 @@ data class TranslatorUiState(
 
     val termsAccepted: Boolean get() = termsAcceptedAt != null
 
-    /** From and To must differ (Auto-Detect can be anything). */
-    val languagesValid: Boolean get() = sourceLanguage != targetLanguage
-
-    val canAddBook: Boolean get() = configured && languagesValid && !importing
+    val canAddBook: Boolean get() = configured && !importing
 
     fun isRunning(book: BookEntity) = live.running && live.bookId == book.id
 }
@@ -93,7 +72,6 @@ private data class Settings(
     val activeModel: String?,
     val outputFormat: DocFormat,
     val termsAcceptedAt: Long?,
-    val languages: Pair<Language, Language>,
 )
 
 /** The page in progress, ready to draw: finished blocks plus the streaming micro-chunk. */
@@ -120,21 +98,11 @@ data class LivePage(
 private data class LocalState(
     val selectedBookId: Long? = null,
     val importing: Boolean = false,
-    val openingBookId: Long? = null,
     val message: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
-/**
- * [saved] is the process-death-proof part of the UI state: which sheet or
- * screen was open (the API key sheet, its in-app browser, the reader), so a
- * user who was killed in the background while fetching an OTP comes back to
- * the very screen they left.
- */
-class TranslatorViewModel(
-    private val app: HinglishApp,
-    private val saved: SavedStateHandle = SavedStateHandle(),
-) : ViewModel() {
+class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
     private val local = MutableStateFlow(LocalState())
 
@@ -143,7 +111,6 @@ class TranslatorViewModel(
         app.activeModel,
         app.preferences.outputFormat,
         app.preferences.termsAcceptedAt,
-        combine(app.preferences.sourceLanguage, app.preferences.targetLanguage, ::Pair),
         ::Settings,
     )
 
@@ -159,13 +126,10 @@ class TranslatorViewModel(
             activeModel = s.activeModel,
             outputFormat = s.outputFormat,
             termsAcceptedAt = s.termsAcceptedAt,
-            sourceLanguage = s.languages.first,
-            targetLanguage = s.languages.second,
             books = books,
             selectedBookId = l.selectedBookId,
             live = live,
             importing = l.importing,
-            openingBookId = l.openingBookId,
             message = l.message,
         )
     }.stateIn(
@@ -175,8 +139,6 @@ class TranslatorViewModel(
             providers = app.providers.state.value,
             outputFormat = app.preferences.outputFormat.value,
             termsAcceptedAt = app.preferences.termsAcceptedAt.value,
-            sourceLanguage = app.preferences.sourceLanguage.value,
-            targetLanguage = app.preferences.targetLanguage.value,
         ),
     )
 
@@ -208,10 +170,6 @@ class TranslatorViewModel(
                 TranslationService.start(app)
             }
         }
-        // Killed while listening: open the same book again.
-        saved.get<Long>(KEY_LISTEN)?.let { id ->
-            viewModelScope.launch { app.db.bookDao().get(id)?.let(::listen) }
-        }
     }
 
     fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
@@ -224,39 +182,12 @@ class TranslatorViewModel(
     fun setReaderTextSize(sp: Float) = app.readerSettings.setTextSize(sp)
 
     /** Picks the AI provider (Gemini, OpenAI, Claude, Groq) used for the next request. */
-    fun selectProvider(provider: AIProvider) {
-        app.providers.select(provider)
-        app.resetFailover()
-    }
+    fun selectProvider(provider: AIProvider) = app.providers.select(provider)
 
     /** Stores a pasted key on this phone, for [provider] only. */
     fun saveApiKey(provider: AIProvider, key: String) {
         app.providers.saveKey(provider, key)
-        app.resetFailover()
-        closeProviderSheet()
-        _keySaved.value = provider
-    }
-
-    /**
-     * A key captured automatically (copied in the in-app browser, or found on
-     * the clipboard): saved at once for the provider it belongs to, which
-     * becomes the selected one; the sheet closes and the success screen shows.
-     */
-    fun autoSaveKey(provider: AIProvider, key: String) {
-        app.providers.saveKey(provider, key)
-        app.resetFailover()
-        if (!state.value.live.running) app.providers.select(provider)
-        closeProviderSheet()
-        _keySaved.value = provider
-    }
-
-    private val _keySaved = MutableStateFlow<AIProvider?>(null)
-
-    /** Set right after a key is saved: shows "✅ API Key Saved Successfully!". */
-    val keySaved: StateFlow<AIProvider?> = _keySaved.asStateFlow()
-
-    fun keySavedShown() {
-        _keySaved.value = null
+        showMessage("${provider.displayName} API key saved on this phone")
     }
 
     fun removeApiKey(provider: AIProvider) = app.providers.clearKey(provider)
@@ -268,21 +199,6 @@ class TranslatorViewModel(
     }
 
     fun setOutputFormat(format: DocFormat) = app.preferences.setOutputFormat(format)
-
-    /** "From" for books added from now on (a book keeps the pair it was added with). */
-    fun setSourceLanguage(language: Language) = app.preferences.setSourceLanguage(language)
-
-    /** "To" for books added from now on. */
-    fun setTargetLanguage(language: Language) = app.preferences.setTargetLanguage(language)
-
-    /** ⇄: From becomes To and To becomes From (not possible from Auto-Detect). */
-    fun swapLanguages() {
-        val from = app.preferences.sourceLanguage.value
-        val to = app.preferences.targetLanguage.value
-        if (from == Language.AUTO_DETECT) return
-        app.preferences.setSourceLanguage(to)
-        app.preferences.setTargetLanguage(from)
-    }
 
     /** The user ticked the box and tapped "I Agree". */
     fun acceptTerms() = app.preferences.acceptTerms()
@@ -299,9 +215,6 @@ class TranslatorViewModel(
                         title = imported.title,
                         format = imported.format,
                         sourcePath = imported.file.absolutePath,
-                        // The book keeps this pair even if the dropdowns change later.
-                        sourceLanguage = state.value.sourceLanguage.code,
-                        language = state.value.targetLanguage.code,
                     ),
                 )
                 local.update { it.copy(selectedBookId = id) }
@@ -340,126 +253,6 @@ class TranslatorViewModel(
         }
     }
 
-    private val _reader = MutableStateFlow(restoreReader())
-
-    /**
-     * The book open in the in-app reader, if any. It survives rotation with the
-     * ViewModel and process death through [saved] (the exported copy stays in
-     * the app's files, so it is simply reopened).
-     */
-    val reader: StateFlow<ReaderDocument?> = _reader.asStateFlow()
-
-    private fun openReader(document: ReaderDocument?) {
-        _reader.value = document
-        saved[KEY_READER] = document?.let {
-            Bundle().apply {
-                putLong("book", it.bookId)
-                putString("title", it.title)
-                putString("path", it.file.path)
-                putString("format", it.format.name)
-            }
-        }
-    }
-
-    private fun restoreReader(): ReaderDocument? {
-        val bundle = saved.get<Bundle>(KEY_READER) ?: return null
-        val file = File(bundle.getString("path") ?: return null)
-        val format = DocFormat.entries.firstOrNull { it.name == bundle.getString("format") }
-        if (!file.isFile || format == null) return null
-        return ReaderDocument(bundle.getLong("book"), bundle.getString("title").orEmpty(), file, format)
-    }
-
-    val readerDark: StateFlow<Boolean> = app.preferences.readerDark
-    val readerScale: StateFlow<Float> = app.preferences.readerScale
-
-    fun setReaderDark(dark: Boolean) = app.preferences.setReaderDark(dark)
-
-    fun setReaderScale(scale: Float) = app.preferences.setReaderScale(scale)
-
-    /** "Read Now": writes a private copy in the chosen output format and opens it in the reader. */
-    fun readNow(book: BookEntity) {
-        if (local.value.openingBookId != null) return
-        val format = state.value.outputFormat
-        local.update { it.copy(openingBookId = book.id) }
-        viewModelScope.launch {
-            try {
-                val file = app.exporter.exportForReading(book, format)
-                if (_listening.value != null) closeListen()
-                openReader(ReaderDocument(book.id, book.title, file, format))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                showMessage("Could not open the book: ${e.message}")
-            } finally {
-                local.update { it.copy(openingBookId = null) }
-            }
-        }
-    }
-
-    fun closeReader() = openReader(null)
-
-    private val _listening = MutableStateFlow<ListenDocument?>(null)
-
-    /** The book being read aloud ("Listen"), if any. */
-    val listening: StateFlow<ListenDocument?> = _listening.asStateFlow()
-
-    /** The phone's voice: spoken help and books read aloud. */
-    val voice: Voice get() = app.voice
-
-    val voiceHelp: StateFlow<Boolean> = app.preferences.voiceHelp
-    val speechRate: StateFlow<Float> = app.preferences.speechRate
-
-    fun setVoiceHelp(on: Boolean) = app.preferences.setVoiceHelp(on)
-
-    fun setSpeechRate(rate: Float) = app.preferences.setSpeechRate(rate)
-
-    fun listenPosition(bookId: Long) = app.preferences.listenPosition(bookId)
-
-    fun setListenPosition(bookId: Long, paragraph: Int) = app.preferences.setListenPosition(bookId, paragraph)
-
-    /** "Listen": the book's translated pages, read aloud by the phone's voice. */
-    fun listen(book: BookEntity) {
-        openReader(null)
-        saved[KEY_LISTEN] = book.id
-        viewModelScope.launch {
-            val pages = withContext(Dispatchers.IO) { app.db.pageDao().pages(book.id) }
-            val paragraphs = withContext(Dispatchers.Default) { paragraphsOf(pages) }
-            _listening.value = ListenDocument(book.id, book.title, book.toLanguage, paragraphs)
-        }
-    }
-
-    fun closeListen() {
-        app.voice.stop()
-        saved.remove<Long>(KEY_LISTEN)
-        _listening.value = null
-    }
-
-    /** The "AI provider & API key" sheet (status banner, menu, or Translate without a key). */
-    val providerSheet: StateFlow<Boolean> = saved.getStateFlow(KEY_PROVIDER_SHEET, false)
-
-    /** The bottom tab on screen (kept through process death, like the sheets). */
-    val tab: StateFlow<Int> = saved.getStateFlow(KEY_TAB, AppTab.TRANSLATE.ordinal)
-
-    fun selectTab(tab: AppTab) {
-        saved[KEY_TAB] = tab.ordinal
-    }
-
-    /** The in-app "Get API Key" browser, opened from that sheet. */
-    val keyBrowser: StateFlow<Boolean> = saved.getStateFlow(KEY_KEY_BROWSER, false)
-
-    fun showProviderSheet(show: Boolean) {
-        if (show) saved[KEY_PROVIDER_SHEET] = true else closeProviderSheet()
-    }
-
-    fun showKeyBrowser(show: Boolean) {
-        saved[KEY_KEY_BROWSER] = show
-    }
-
-    private fun closeProviderSheet() {
-        saved[KEY_KEY_BROWSER] = false
-        saved[KEY_PROVIDER_SHEET] = false
-    }
-
     fun delete(book: BookEntity) {
         if (state.value.isRunning(book)) return
         viewModelScope.launch {
@@ -469,26 +262,17 @@ class TranslatorViewModel(
         }
     }
 
-    /** All translated pages of [book] as plain text, with bullets, numbering and page breaks. */
-    suspend fun plainText(book: BookEntity): String = withContext(Dispatchers.IO) {
-        app.db.pageDao().pages(book.id)
-            .filter { it.translatedText != null }
-            .joinToString("\n\n") { page -> "— ${page.pageNumber} —\n\n${page.translatedText.orEmpty()}" }
-    }
+    /** All translated pages as plain text, with bullets, numbering and page breaks. */
+    fun plainText(): String =
+        pages.value.joinToString("\n\n") { page -> "— ${page.pageNumber} —\n\n${page.translatedText.orEmpty()}" }
 
     fun showMessage(text: String) = local.update { it.copy(message = text) }
 
     fun messageShown() = local.update { it.copy(message = null) }
 
     companion object {
-        const val KEY_PROVIDER_SHEET = "provider_sheet"
-        const val KEY_KEY_BROWSER = "key_browser"
-        const val KEY_READER = "reader"
-        const val KEY_TAB = "tab"
-        const val KEY_LISTEN = "listen"
-
         val Factory = viewModelFactory {
-            initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp, createSavedStateHandle()) }
+            initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp) }
         }
     }
 }

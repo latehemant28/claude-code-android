@@ -1,8 +1,6 @@
 package com.example.hinglishpdf
 
 import android.app.Application
-import com.example.hinglishpdf.data.ProviderFailover
-import com.example.hinglishpdf.data.RequestPacer
 import com.example.hinglishpdf.data.TranslationRepository
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.ai.AITranslator
@@ -14,8 +12,6 @@ import com.example.hinglishpdf.data.pdf.PdfTextExtractor
 import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.settings.AppPreferences
 import com.example.hinglishpdf.data.settings.ProviderSettings
-import com.example.hinglishpdf.data.voice.AndroidVoice
-import com.example.hinglishpdf.data.voice.Voice
 import com.example.hinglishpdf.service.Notifications
 import com.example.hinglishpdf.service.TranslationMonitor
 import com.example.hinglishpdf.ui.reader.ReaderSettingsStore
@@ -43,42 +39,15 @@ class HinglishApp : Application() {
     /** Output format (PDF / EPUB) and Terms of Use acceptance. */
     val preferences by lazy { AppPreferences(this) }
 
-    /** The phone's text-to-speech voice: spoken help, and books read aloud. */
-    val voice: Voice by lazy { AndroidVoice(this) }
-
     val db by lazy { AppDatabase.create(this) }
     val translationRepository by lazy {
         TranslationRepository(
-            model = AITranslator { systemPrompt, chunk -> translator().translate(systemPrompt, chunk) },
+            model = AITranslator { chunk -> translator().translate(chunk) },
             // Paced for the provider selected now, so switching provider applies at once.
-            pacer = RequestPacer(minIntervalMillis = { providers.state.value.provider.chunkPauseMillis }),
             chunkPauseMillis = { providers.state.value.provider.chunkPauseMillis },
             rateLimitWaitMillis = { providers.state.value.provider.rateLimitWaitMillis },
-            failover = failover,
         )
     }
-
-    /** Providers that failed for good in this app session (out of credit, bad key...): not switched back to. */
-    private val failedProviders = mutableSetOf<AIProvider>()
-
-    /**
-     * Smart fallback: the provider in use failed for good, so continue with
-     * the next one the user has a key for (free tiers first). The selection
-     * changes in the app too, so the user sees which engine is working.
-     */
-    private val failover = ProviderFailover {
-        synchronized(failedProviders) {
-            val settings = providers.state.value
-            failedProviders += settings.provider
-            val next = FAILOVER_ORDER.firstOrNull { it !in failedProviders && settings.key(it).isNotBlank() }
-                ?: return@ProviderFailover null
-            providers.select(next)
-            next.displayName
-        }
-    }
-
-    /** After the user changes keys or providers, every provider gets a fresh chance. */
-    fun resetFailover() = synchronized(failedProviders) { failedProviders.clear() }
 
     /** "OpenAI · gpt-4.1-mini": the provider and model that answered last; null before the first page. */
     val activeModel = MutableStateFlow<String?>(null)
@@ -126,10 +95,5 @@ class HinglishApp : Application() {
             File(filesDir, "models").deleteRecursively()
             getExternalFilesDir("models")?.deleteRecursively()
         }
-    }
-
-    private companion object {
-        /** Gemini first (a generous free tier), then the other free tier, then the paid ones. */
-        val FAILOVER_ORDER = listOf(AIProvider.GEMINI, AIProvider.GROQ, AIProvider.OPENAI, AIProvider.ANTHROPIC)
     }
 }

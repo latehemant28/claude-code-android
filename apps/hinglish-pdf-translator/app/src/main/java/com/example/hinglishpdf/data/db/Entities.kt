@@ -1,6 +1,5 @@
 package com.example.hinglishpdf.data.db
 
-import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -8,7 +7,6 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
-import com.example.hinglishpdf.data.llm.Language
 
 enum class BookStatus {
     /** Waiting for the service (or interrupted before it started). */
@@ -32,13 +30,11 @@ data class BookEntity(
     /** Private copy of the picked file (the original URI may not stay readable). */
     val sourcePath: String,
     /**
-     * Target language code ("hi", "es"...), chosen with the "To" dropdown
-     * when the book was added. Books from before 5.0 hold "Hinglish" (Hindi).
+     * Output language label (unused by the app now, which always translates to
+     * Hindi). Kept as a plain string so databases written by earlier versions
+     * still open without a migration.
      */
-    val language: String = Language.HINDI.code,
-    /** Source language code, or "auto" for Auto-Detect ("From" dropdown). Added in database version 2. */
-    @ColumnInfo(defaultValue = "auto")
-    val sourceLanguage: String = Language.AUTO_DETECT.code,
+    val language: String = "Hinglish",
     val pageCount: Int = 0,
     val status: BookStatus = BookStatus.QUEUED,
     val error: String? = null,
@@ -47,9 +43,6 @@ data class BookEntity(
     val outputName: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
 ) {
-    val toLanguage: Language get() = Language.fromCode(language, fallback = Language.HINDI)
-    val fromLanguage: Language get() = Language.fromCode(sourceLanguage, fallback = Language.AUTO_DETECT)
-
     /** PDFs have real pages; EPUBs are cut into page-sized sections. */
     val unitName: String get() = if (format == DocFormat.PDF) "page" else "section"
 }

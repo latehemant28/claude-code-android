@@ -1,7 +1,6 @@
 package com.example.hinglishpdf.data.ai
 
-import com.example.hinglishpdf.data.llm.Language
-import com.example.hinglishpdf.data.llm.TranslationPrompt
+import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.first
@@ -98,13 +97,10 @@ class ProviderTranslatorsTest {
     @After
     fun stop() = server.close()
 
-    /** The system prompt every provider must send as its system instruction. */
-    private val SYSTEM = TranslationPrompt.system(Language.ENGLISH, Language.SPANISH)
-
     private fun sse(vararg events: String) = events.joinToString("") { "data: $it\n\n" }
 
     private fun answer(translator: AITranslator): String =
-        runBlocking { translator.translate(SYSTEM, "Hello world.").toList().joinToString("") }
+        runBlocking { translator.translate("Hello world.").toList().joinToString("") }
 
     private fun failure(translator: AITranslator): TranslatorException = try {
         answer(translator)
@@ -139,7 +135,7 @@ class ProviderTranslatorsTest {
         assertEquals("/v1beta/models/gemini-x:streamGenerateContent", r.path)
         assertEquals("alt=sse", r.query)
         assertEquals("gem-key", r.headers["x-goog-api-key"])
-        assertEquals(SYSTEM, r.body["systemInstruction"].asJsonObject["parts"].asJsonArray[0].asJsonObject["text"].asString)
+        assertEquals(HinglishPrompt.SYSTEM_PROMPT, r.body["systemInstruction"].asJsonObject["parts"].asJsonArray[0].asJsonObject["text"].asString)
         val content = r.body["contents"].asJsonArray[0].asJsonObject
         assertEquals("user", content["role"].asString)
         assertEquals("Hello world.", content["parts"].asJsonArray[0].asJsonObject["text"].asString)
@@ -184,27 +180,6 @@ class ProviderTranslatorsTest {
     }
 
     @Test
-    fun `an answer cut off at the length limit is reported, for every provider`() {
-        replies = { Reply(200, sse("""{"candidates":[{"content":{"parts":[{"text":"आधा"}]},"finishReason":"MAX_TOKENS"}]}""")) }
-        assertTrue(failure(gemini()) is TranslatorException.Truncated)
-
-        replies = { Reply(200, sse("""{"choices":[{"index":0,"delta":{"content":"आधा"},"finish_reason":"length"}]}""", "[DONE]")) }
-        assertTrue(failure(openAi()) is TranslatorException.Truncated)
-        assertTrue(failure(groq()) is TranslatorException.Truncated)
-
-        replies = {
-            Reply(
-                200,
-                sse(
-                    """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"आधा"}}""",
-                    """{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}""",
-                ),
-            )
-        }
-        assertTrue(failure(claude()) is TranslatorException.Truncated)
-    }
-
-    @Test
     fun `an unreadable stream is retried, not a book stop`() {
         replies = { Reply(200, sse("""{"candidates":[{"content":""", "not json")) }
         val e = failure(gemini())
@@ -238,7 +213,7 @@ class ProviderTranslatorsTest {
         assertTrue(r.body["stream"].asBoolean)
         val messages = r.body["messages"].asJsonArray.map { it.asJsonObject }
         assertEquals(listOf("system", "user"), messages.map { it["role"].asString })
-        assertEquals(SYSTEM, messages[0]["content"].asString)
+        assertEquals(HinglishPrompt.SYSTEM_PROMPT, messages[0]["content"].asString)
         assertEquals("Hello world.", messages[1]["content"].asString)
     }
 
@@ -355,7 +330,7 @@ class ProviderTranslatorsTest {
         assertEquals("sk-ant-test", r.headers["x-api-key"])
         assertEquals("2023-06-01", r.headers["anthropic-version"])
         assertEquals("claude-test", r.body["model"].asString)
-        assertEquals(SYSTEM, r.body["system"].asString)
+        assertEquals(HinglishPrompt.SYSTEM_PROMPT, r.body["system"].asString)
         assertTrue(r.body["max_tokens"].asInt >= 4_096)
         val message = r.body["messages"].asJsonArray.single().asJsonObject
         assertEquals("user", message["role"].asString)
@@ -395,17 +370,18 @@ class ProviderTranslatorsTest {
 
     @Test
     fun `no connection is retried later`() {
-        // Port 1 is never open: the connection is refused at once. (Reusing a just-closed
-        // test port was flaky: another socket can take it in between.)
-        val e = failure(OpenAITranslator("k", "m", endpoint = "http://127.0.0.1:1/v1/chat/completions"))
+        val port = server.localPort
+        server.close()
+        val e = failure(OpenAITranslator("k", "m", endpoint = "http://127.0.0.1:$port/v1/chat/completions"))
         assertTrue(e is TranslatorException.Transient && e.message == "No internet connection")
+        start() // for @After
     }
 
     @Test
     fun `pausing stops a stalled stream at once`() {
         replies = { Reply(200, sse("""{"choices":[{"delta":{"content":"पहला"}}]}"""), hangAfter = true) }
         val started = System.nanoTime()
-        val first = runBlocking { withTimeout(10_000) { openAi().translate(SYSTEM, "x").first() } }
+        val first = runBlocking { withTimeout(10_000) { openAi().translate("x").first() } }
         assertEquals("पहला", first)
         assertTrue((System.nanoTime() - started) / 1_000_000 < 10_000)
     }

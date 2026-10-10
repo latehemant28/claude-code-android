@@ -1,5 +1,6 @@
 package com.example.hinglishpdf.data.ai
 
+import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
@@ -14,14 +15,14 @@ class AnthropicTranslator(
     private val endpoint: String = "https://api.anthropic.com/v1/messages",
 ) : HttpStreamingTranslator("Claude", model) {
 
-    override fun request(systemPrompt: String, chunk: String, temperature: Boolean) = Request(
+    override fun request(chunk: String, temperature: Boolean) = Request(
         url = endpoint,
         headers = mapOf("x-api-key" to apiKey, "anthropic-version" to API_VERSION),
         body = jsonObject {
             addProperty("model", model)
             // Room for a whole chunk in Devanagari, which takes several tokens per word.
-            addProperty("max_tokens", if (model.startsWith("claude-3-haiku")) CLAUDE_3_MAX_TOKENS else MAX_TOKENS)
-            addProperty("system", systemPrompt)
+            addProperty("max_tokens", MAX_TOKENS)
+            addProperty("system", HinglishPrompt.SYSTEM_PROMPT)
             add(
                 "messages",
                 JsonArray().apply {
@@ -36,9 +37,8 @@ class AnthropicTranslator(
     override fun textOf(event: JsonObject): String? = when (event.string("type")) {
         "content_block_delta" -> event.obj("delta")?.takeIf { it.string("type") == "text_delta" }?.string("text")
         "message_delta" -> {
-            when (event.obj("delta")?.string("stop_reason")) {
-                "refusal" -> throw TranslatorException.Blocked("Claude declined this text")
-                "max_tokens" -> throw TranslatorException.Truncated("Claude's answer reached its length limit")
+            if (event.obj("delta")?.string("stop_reason") == "refusal") {
+                throw TranslatorException.Blocked("Claude declined this text")
             }
             null
         }
@@ -79,7 +79,6 @@ class AnthropicTranslator(
     private companion object {
         const val API_VERSION = "2023-06-01"
         const val MAX_TOKENS = 8_192
-        const val CLAUDE_3_MAX_TOKENS = 4_096 // the most Claude 3 Haiku can write in one answer
         val TOO_LONG = Regex("prompt is too long|too many tokens", RegexOption.IGNORE_CASE)
         val NO_CREDIT = Regex("credit balance is too low", RegexOption.IGNORE_CASE)
     }

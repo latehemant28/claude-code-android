@@ -10,20 +10,12 @@ enum class AIProvider(
     val displayName: String,
     /** The provider's official API-key dashboard. */
     val keyPageUrl: String,
-    /**
-     * Tried in this order; a model the user types in the app is tried first.
-     * Each list starts with the fast, low-cost model chosen for zero-config
-     * use; when the provider has retired it (404), the next one takes over
-     * automatically for the rest of the session.
-     */
+    /** Tried in this order; a model the user types in the app is tried first. */
     val defaultModels: List<String>,
-    /**
-     * Smart throttling: the pause between pages (and the spacing between
-     * requests), sized for the free tier's requests-per-minute limit.
-     */
+    /** Fixed pause after every chunk. Free tiers allow only a few requests a minute. */
     val chunkPauseMillis: Long,
-    /** Wait after a rate-limit (429) answer before trying again: a full minute lets the limit refresh. */
-    val rateLimitWaitMillis: Long = 60_000,
+    /** Shortest wait after a rate-limit (429) answer before trying again. */
+    val rateLimitWaitMillis: Long,
     /** Shown under the key: where the text goes and what it costs. */
     val dataNote: String,
 ) {
@@ -31,24 +23,26 @@ enum class AIProvider(
         displayName = "Google Gemini",
         keyPageUrl = "https://aistudio.google.com/app/apikey",
         defaultModels = GEMINI_MODELS,
-        chunkPauseMillis = 4_000, // free tier: 15 requests a minute
+        chunkPauseMillis = 4_500, // ~13 requests a minute, under the free tier's 15
+        rateLimitWaitMillis = 60_000,
         dataNote = "Each page's text is sent to Google to be translated. On the free tier, " +
             "Google may use it to improve its products.",
     ),
     OPENAI(
         displayName = "OpenAI",
         keyPageUrl = "https://platform.openai.com/api-keys",
-        defaultModels = listOf("gpt-4o-mini", "gpt-4.1-mini", "gpt-5-mini"),
-        chunkPauseMillis = 20_000, // free / first tier: 3 requests a minute
+        defaultModels = listOf("gpt-4.1-mini", "gpt-4o-mini", "gpt-5-mini"),
+        chunkPauseMillis = 1_000,
+        rateLimitWaitMillis = 20_000,
         dataNote = "Each page's text is sent to OpenAI to be translated. Paid per use; " +
             "the API key's account needs billing credit.",
     ),
     ANTHROPIC(
         displayName = "Anthropic Claude",
         keyPageUrl = "https://console.anthropic.com/settings/keys",
-        // Claude 3 Haiku was retired on 19 Apr 2026; current Haiku models follow it.
-        defaultModels = listOf("claude-3-haiku-20240307", "claude-haiku-5-5", "claude-haiku-4-5", "claude-sonnet-5-5"),
-        chunkPauseMillis = 12_000, // first tier: 5 requests a minute
+        defaultModels = listOf("claude-haiku-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"),
+        chunkPauseMillis = 1_000,
+        rateLimitWaitMillis = 20_000,
         dataNote = "Each page's text is sent to Anthropic to be translated. Paid per use; " +
             "the API key's account needs credit.",
     ),
@@ -56,7 +50,8 @@ enum class AIProvider(
         displayName = "Groq",
         keyPageUrl = "https://console.groq.com/keys",
         defaultModels = listOf("llama-3.3-70b-versatile", "openai/gpt-oss-120b"),
-        chunkPauseMillis = 2_000, // free tier: 30 requests a minute
+        chunkPauseMillis = 4_500, // the free tier allows only a few thousand tokens a minute
+        rateLimitWaitMillis = 30_000,
         dataNote = "Each page's text is sent to Groq to be translated. The free tier has small " +
             "per-minute and per-day limits, so a long book takes a while.",
     ),
@@ -70,11 +65,7 @@ enum class AIProvider(
         GROQ -> GroqTranslator(apiKey, model)
     }
 
-    /**
-     * Zero-config models: with the Model field empty, the provider's best
-     * default ([defaultModels], tried in order) is used automatically;
-     * [customModel] (typed in the app) is tried first.
-     */
+    /** [customModel] (typed in the app) first, then the defaults. */
     fun models(customModel: String?): List<String> =
         (listOfNotNull(customModel?.trim()?.takeIf { it.isNotEmpty() }) + defaultModels).distinct()
 }

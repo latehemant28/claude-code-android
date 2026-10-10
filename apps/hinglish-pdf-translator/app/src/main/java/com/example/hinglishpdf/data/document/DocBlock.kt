@@ -16,12 +16,6 @@ data class DocBlock(
     val text: String,
     val level: Int = 0,
     val marker: String = "",
-    /**
-     * Follows the previous block after a manual line break (`<br/>` in an
-     * EPUB: verse, addresses, dialogue), not after a paragraph break; shown
-     * on the next line, without paragraph spacing.
-     */
-    val lineBreak: Boolean = false,
 ) {
     /** Code is copied verbatim; translating it would break it. */
     val isTranslatable: Boolean get() = kind != BlockKind.CODE && text.any(Char::isLetter)

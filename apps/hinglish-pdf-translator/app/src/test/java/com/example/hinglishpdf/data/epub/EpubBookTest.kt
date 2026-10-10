@@ -43,7 +43,6 @@ class EpubBookTest {
         <?xml version="1.0" encoding="UTF-8"?>
         <html xmlns="http://www.w3.org/1999/xhtml"><body>
           <h2>Part Two</h2><blockquote><p>Stay curious.</p></blockquote>
-          <p class="verse">Roses are red,<br/>Violets are <em>blue</em>.<br/></p>
         </body></html>
     """.trimIndent()
 
@@ -98,9 +97,6 @@ class EpubBookTest {
                 DocBlock(BlockKind.CODE, "val x = 1"),
                 DocBlock(BlockKind.HEADING, "Part Two", level = 2),
                 DocBlock(BlockKind.QUOTE, "Stay curious."),
-                // A <br/> keeps each line on its own line instead of merging them.
-                DocBlock(BlockKind.PARAGRAPH, "Roses are red,"),
-                DocBlock(BlockKind.PARAGRAPH, "Violets are blue.", lineBreak = true),
             ),
             content.blocks,
         )
@@ -139,10 +135,6 @@ class EpubBookTest {
             val opf = zip.getInputStream(zip.getEntry("OEBPS/content.opf")).readBytes().toString(Charsets.UTF_8)
             assertTrue(opf, opf.contains("<dc:language>hi</dc:language>"))
             assertTrue(opf.contains("<dc:title>Test Book</dc:title>"))
-
-            // Each verse line translated in place, the line breaks kept.
-            val verse = zip.getInputStream(zip.getEntry("OEBPS/text/ch2.xhtml")).readBytes().toString(Charsets.UTF_8)
-            assertTrue(verse, verse.contains("T11 Roses are red,<br />T12 Violets are blue.<br />"))
             assertTrue(opf.contains("""href="text/ch%201.xhtml""""))
         }
     }

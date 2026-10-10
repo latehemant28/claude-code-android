@@ -1,5 +1,6 @@
 package com.example.hinglishpdf.data.ai
 
+import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
@@ -31,11 +32,11 @@ class GeminiTranslator(
     private val baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
 ) : HttpStreamingTranslator("Gemini", model) {
 
-    override fun request(systemPrompt: String, chunk: String, temperature: Boolean) = Request(
+    override fun request(chunk: String, temperature: Boolean) = Request(
         url = "$baseUrl/models/$model:streamGenerateContent?alt=sse",
         headers = mapOf("x-goog-api-key" to apiKey),
         body = jsonObject {
-            add("systemInstruction", jsonObject { add("parts", textParts(systemPrompt)) })
+            add("systemInstruction", jsonObject { add("parts", textParts(HinglishPrompt.SYSTEM_PROMPT)) })
             add(
                 "contents",
                 JsonArray().apply {
@@ -70,7 +71,6 @@ class GeminiTranslator(
             ?.joinToString("")
         candidate.string("finishReason")?.let { reason ->
             if (reason in BLOCKED) throw TranslatorException.Blocked("Gemini stopped its answer ($reason)")
-            if (reason == "MAX_TOKENS") throw TranslatorException.Truncated("Gemini's answer reached its length limit")
         }
         return text
     }

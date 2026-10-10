@@ -50,16 +50,9 @@ object EpubBook {
      * Writes [source] to [target] with each block's text replaced by
      * [translations] (aligned with the blocks returned by [read]; null keeps
      * the original text). Chapters and the package are re-labelled as
-     * [language] (and right-to-left if [rightToLeft]), so readers pick the
-     * right font and shape the script correctly.
+     * [language], so readers pick a Hindi font and shape Devanagari correctly.
      */
-    fun writeTranslated(
-        source: File,
-        target: OutputStream,
-        translations: List<String?>,
-        language: String = "hi",
-        rightToLeft: Boolean = false,
-    ) {
+    fun writeTranslated(source: File, target: OutputStream, translations: List<String?>, language: String = "hi") {
         ZipFile(source).use { zip ->
             val spine = readSpine(zip)
             val chapters = spine.chapters.toSet()
@@ -74,7 +67,6 @@ object EpubBook {
                 doc.allElements.firstOrNull { it.localName() == "html" }?.let { html ->
                     html.attr("xml:lang", language)
                     if (html.hasAttr("lang")) html.attr("lang", language) // XHTML 1.1 (EPUB 2) has no "lang"
-                    html.attr("dir", if (rightToLeft) "rtl" else "ltr")
                 }
                 rewritten[path] = serialize(doc).toByteArray(Charsets.UTF_8)
             }
@@ -114,9 +106,6 @@ object EpubBook {
             }
         }
     }
-
-    /** The chapter files in reading (spine) order, as paths inside the zip (for the in-app reader). */
-    fun chapterPaths(zip: ZipFile): List<String> = readSpine(zip).chapters
 
     // ---------------------------------------------------------------- spine
 
@@ -202,27 +191,18 @@ object EpubBook {
         }
         val run = mutableListOf<Node>()
         var runIndex = 0
-        var afterBreak = false
         fun flush() {
             val text = run.joinToString("") { textOf(it) }.replace(WHITESPACE, " ").trim()
             if (text.isNotEmpty()) {
-                val block = blockFor(element, text, firstRun = runIndex == 0)
-                out += TextRun(if (afterBreak && runIndex > 0) block.copy(lineBreak = true) else block, run.toList())
+                out += TextRun(blockFor(element, text, firstRun = runIndex == 0), run.toList())
                 runIndex++
             }
-            afterBreak = false
             run.clear()
         }
         for (child in element.childNodes()) {
             if (child is Element) {
                 val tag = child.localName()
                 when {
-                    // A manual line break: each line is translated on its own and
-                    // keeps its own line; the <br/> stays where it is.
-                    tag == "br" -> {
-                        flush()
-                        afterBreak = true
-                    }
                     tag in SKIP_TAGS -> run += child // kept in place, contributes no text
                     tag in BLOCK_TAGS -> {
                         flush()

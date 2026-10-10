@@ -2,7 +2,6 @@ package com.example.hinglishpdf.data.epub
 
 import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
-import com.example.hinglishpdf.data.document.ExportLabels
 import java.io.OutputStream
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -17,10 +16,8 @@ import java.util.zip.ZipOutputStream
  * the book's top-level headings (or every [PAGES_PER_CHAPTER] pages when it
  * has none), with:
  *
- *  - UTF-8 throughout and `xml:lang` set to the target language (plus
- *    `dir="rtl"` for Arabic or Urdu), so readers pick the right font and
- *    shape the script correctly; Noto Sans Devanagari is embedded for
- *    Devanagari languages;
+ *  - UTF-8 throughout and `xml:lang="hi"`, so readers pick a Hindi font and
+ *    shape Devanagari correctly; Noto Sans Devanagari is embedded too;
  *  - headings, nested bulleted and numbered lists (original markers kept),
  *    quotes and code as real XHTML;
  *  - a navigation document (table of contents) plus a legacy toc.ncx, and,
@@ -45,13 +42,10 @@ object EpubWriter {
         pageMarkers: Boolean,
         fonts: Map<String, ByteArray> = emptyMap(),
         language: String = "hi",
-        rightToLeft: Boolean = false,
-        labels: ExportLabels = ExportLabels.HINDI,
         identifier: String = "urn:uuid:${UUID.randomUUID()}",
         modified: Instant = Instant.now(),
     ) {
-        val dir = if (rightToLeft) "rtl" else "ltr"
-        val chapters = chapters(sections, pageMarkers, language, dir, labels)
+        val chapters = chapters(sections, pageMarkers, language)
         ZipOutputStream(out).use { zip ->
             // The EPUB spec requires "mimetype" first and uncompressed.
             val mimetype = "application/epub+zip".toByteArray(Charsets.US_ASCII)
@@ -74,8 +68,8 @@ object EpubWriter {
             fun put(name: String, text: String) = put(name, text.toByteArray(Charsets.UTF_8))
 
             put("META-INF/container.xml", CONTAINER)
-            put("OEBPS/content.opf", opf(title, language, dir, identifier, modified, chapters, fonts.keys))
-            put("OEBPS/nav.xhtml", nav(title, language, dir, labels, chapters, pageMarkers))
+            put("OEBPS/content.opf", opf(title, language, identifier, modified, chapters, fonts.keys))
+            put("OEBPS/nav.xhtml", nav(title, language, chapters, pageMarkers))
             put("OEBPS/toc.ncx", ncx(title, identifier, chapters))
             put("OEBPS/style.css", css(fonts.keys))
             fonts.forEach { (name, bytes) -> put("OEBPS/fonts/$name", bytes) }
@@ -85,13 +79,7 @@ object EpubWriter {
 
     // ------------------------------------------------------------ chapters
 
-    private fun chapters(
-        sections: List<Section>,
-        pageMarkers: Boolean,
-        language: String,
-        dir: String,
-        labels: ExportLabels,
-    ): List<Chapter> {
+    private fun chapters(sections: List<Section>, pageMarkers: Boolean, language: String): List<Chapter> {
         val chapterLevel = chapterHeadingLevel(sections)
         // Group sections; a top-level heading starts a new chapter.
         val groups = mutableListOf<MutableList<Pair<Int, List<Pair<DocBlock, String>>>>>()
@@ -137,7 +125,7 @@ object EpubWriter {
         return groups.mapIndexed { i, parts ->
             val file = "chapter-%03d.xhtml".format(i + 1)
             val pages = parts.map { it.first }.filter { it > 0 }
-            val title = titles[i] ?: pageRangeTitle(parts, i, labels)
+            val title = titles[i] ?: pageRangeTitle(parts, i)
             val body = StringBuilder()
             for ((page, blocks) in parts) {
                 if (pageMarkers && page > 0) {
@@ -146,7 +134,7 @@ object EpubWriter {
                 body.append(XhtmlBlocks.render(blocks))
             }
             if (body.isEmpty()) body.append("<p></p>\n")
-            Chapter(file, title, page(clean(title), language, dir, body.toString()), pages)
+            Chapter(file, title, page(clean(title), language, body.toString()), pages)
         }
     }
 
@@ -162,22 +150,20 @@ object EpubWriter {
         }
     }
 
-    /** "Pages 21–40" ("पृष्ठ 21–40") for a chapter that has no heading of its own. */
-    private fun pageRangeTitle(
-        parts: List<Pair<Int, List<Pair<DocBlock, String>>>>,
-        index: Int,
-        labels: ExportLabels,
-    ): String {
+    /** "पृष्ठ 21–40" (pages 21–40) for a chapter that has no heading of its own. */
+    private fun pageRangeTitle(parts: List<Pair<Int, List<Pair<DocBlock, String>>>>, index: Int): String {
         val pages = parts.map { it.first }.filter { it > 0 }
-        if (pages.isEmpty()) return labels.part(index + 1)
-        return labels.pages(pages.first(), pages.last())
+        if (pages.isEmpty()) return "भाग ${index + 1}"
+        val first = pages.first()
+        val last = pages.last()
+        return if (first == last) "पृष्ठ $first" else "पृष्ठ $first–$last"
     }
 
     // ---------------------------------------------------------------- files
 
-    private fun page(title: String, language: String, dir: String, body: String) = """<?xml version="1.0" encoding="UTF-8"?>
+    private fun page(title: String, language: String, body: String) = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="$language" lang="$language" dir="$dir">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="$language" lang="$language">
 <head>
 <meta charset="UTF-8"/>
 <title>${XhtmlBlocks.escape(title)}</title>
@@ -191,7 +177,6 @@ $body</body>
     private fun opf(
         title: String,
         language: String,
-        dir: String,
         identifier: String,
         modified: Instant,
         chapters: List<Chapter>,
@@ -218,21 +203,14 @@ $body</body>
   </metadata>
   <manifest>
 $manifest  </manifest>
-  <spine toc="ncx" page-progression-direction="$dir">
+  <spine toc="ncx">
 $spine
   </spine>
 </package>
 """
     }
 
-    private fun nav(
-        title: String,
-        language: String,
-        dir: String,
-        labels: ExportLabels,
-        chapters: List<Chapter>,
-        pageMarkers: Boolean,
-    ): String {
+    private fun nav(title: String, language: String, chapters: List<Chapter>, pageMarkers: Boolean): String {
         val toc = chapters.joinToString("\n") {
             """      <li><a href="${it.file}">${XhtmlBlocks.escape(clean(it.title))}</a></li>"""
         }
@@ -245,9 +223,8 @@ $spine
         return page(
             clean(title),
             language,
-            dir,
             """  <nav epub:type="toc" id="toc">
-    <h1>${XhtmlBlocks.escape(labels.contents)}</h1>
+    <h1>विषय-सूची</h1>
     <ol>
 $toc
     </ol>

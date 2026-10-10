@@ -13,13 +13,12 @@ import kotlinx.coroutines.flow.flow
  * pipeline only sees this interface, so it can also be tested without the
  * network.
  *
- * Every implementation sends [systemPrompt] (TranslationPrompt, filled with
- * the book's From / To languages) as its provider's system instruction, and
- * the chunk of text as the user message.
+ * Every implementation sends the same system prompt (HinglishPrompt) as its
+ * provider's system instruction, and the chunk of text as the user message.
  */
 fun interface AITranslator {
     /** Streams the translation of [chunk]; failures are thrown as [TranslatorException]. */
-    fun translate(systemPrompt: String, chunk: String): Flow<String>
+    fun translate(chunk: String): Flow<String>
 }
 
 /** Provider failures, already sorted by what the app should do about them. */
@@ -48,12 +47,6 @@ sealed class TranslatorException(message: String, cause: Throwable? = null) : Ex
 
     /** The provider refused this text (safety filter), or it is too long for one request. */
     class Blocked(message: String, cause: Throwable? = null) : TranslatorException(message, cause)
-
-    /**
-     * The answer reached the model's output limit before the text was
-     * finished: the text is translated again in smaller parts, never kept cut off.
-     */
-    class Truncated(message: String) : TranslatorException(message)
 
     /** Bad API key, no credit, unsupported region, no usable model: retrying cannot help. */
     class Fatal(message: String, cause: Throwable? = null) : TranslatorException(message, cause)
@@ -93,21 +86,21 @@ class FallbackTranslator(
     /** The model that answered the last request (null until the first one). */
     val activeModel: StateFlow<String?> = _activeModel.asStateFlow()
 
-    override fun translate(systemPrompt: String, chunk: String): Flow<String> = flow {
+    override fun translate(chunk: String): Flow<String> = flow {
         for (name in models) {
             if (!isUsable(name)) continue
             var started = false
             try {
-                client(name).translate(systemPrompt, chunk).collect { piece ->
+                client(name).translate(chunk).collect { piece ->
                     started = true
                     emit(piece)
                 }
                 _activeModel.value = name
                 return@flow
             } catch (e: TranslatorException) {
-                // A refusal stays a refusal, and a cut-off answer is redone in smaller
-                // parts; any other failure after text arrived is retried from scratch.
-                if (started && e !is TranslatorException.Blocked && e !is TranslatorException.Truncated) {
+                // A refusal stays a refusal (the text is kept in English); any
+                // other failure after text arrived is retried from scratch.
+                if (started && e !is TranslatorException.Blocked) {
                     throw TranslatorException.Transient("$providerName stopped mid-answer", null, e)
                 }
                 when {

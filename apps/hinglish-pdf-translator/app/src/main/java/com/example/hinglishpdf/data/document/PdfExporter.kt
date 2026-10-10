@@ -8,10 +8,8 @@ import android.graphics.pdf.PdfDocument
 import android.graphics.text.LineBreaker
 import android.text.Layout
 import android.text.StaticLayout
-import android.text.TextDirectionHeuristics
 import android.text.TextPaint
 import com.example.hinglishpdf.data.db.PageEntity
-import com.example.hinglishpdf.data.llm.Language
 import java.io.OutputStream
 
 /**
@@ -23,15 +21,9 @@ import java.io.OutputStream
  * Structure is kept: sized bold headings, bulleted and numbered lists with
  * their nesting and original markers, quotes, code. For a PDF source, a small
  * "— 45 —" marks where each page of the original begins; for an EPUB
- * source, each top-level heading (a chapter) starts a new page. For a
- * right-to-left [language] (Arabic, Urdu) lists, indents and quote bars are
- * mirrored. Scripts the bundled fonts lack fall back to the phone's own
- * Noto fonts, which the PDF embeds just the same.
+ * source, each top-level heading (a chapter) starts a new page.
  */
-class PdfExporter(private val fonts: BundledFonts, private val language: Language = Language.HINDI) {
-
-    private val rtl = language.rightToLeft
-    private val labels = ExportLabels.forLanguage(language)
+class PdfExporter(private val fonts: BundledFonts) {
 
     /** Where the translated text of one original page or section comes from. */
     class Section(val pageNumber: Int, val blocks: List<Pair<DocBlock, String>>)
@@ -83,14 +75,14 @@ class PdfExporter(private val fonts: BundledFonts, private val language: Languag
             if (sourceIsPdf) {
                 items += pageMarker(section.pageNumber, first = items.isEmpty())
                 previous = null
-                if (section.blocks.isEmpty()) items += note(labels.emptyPage)
+                if (section.blocks.isEmpty()) items += note("(इस पेज पर कोई टेक्स्ट नहीं है)")
             }
             for ((block, text) in section.blocks) {
                 items += item(block, text, previous, chapterBreak = !sourceIsPdf && items.isNotEmpty())
                 previous = block
             }
         }
-        if (items.isEmpty()) items += note(labels.emptyBook)
+        if (items.isEmpty()) items += note("(कोई टेक्स्ट नहीं)")
         return items
     }
 
@@ -126,7 +118,6 @@ class PdfExporter(private val fonts: BundledFonts, private val language: Languag
         val prevIsList = previous?.kind == BlockKind.BULLET || previous?.kind == BlockKind.NUMBERED
         val spaceBefore = when {
             previous == null -> BODY_SIZE * 0.5f
-            block.lineBreak -> 0f // the next line of the same paragraph (<br/>)
             block.kind == BlockKind.HEADING -> paint.textSize * 0.9f
             isList && prevIsList -> BODY_SIZE * 0.3f
             else -> BODY_SIZE * 0.75f
@@ -173,7 +164,6 @@ class PdfExporter(private val fonts: BundledFonts, private val language: Languag
     ): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, paint, width.toInt().coerceAtLeast(1))
             .setAlignment(alignment)
-            .setTextDirection(if (rtl) TextDirectionHeuristics.FIRSTSTRONG_RTL else TextDirectionHeuristics.FIRSTSTRONG_LTR)
             .setLineSpacing(0f, lineSpacing) // Devanagari needs room above and below for matras
             .setIncludePad(true)
             .setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY)
@@ -197,8 +187,7 @@ class PdfExporter(private val fonts: BundledFonts, private val language: Languag
 
     private fun draw(canvas: Canvas, item: Item, slice: PdfPaginator.Slice) {
         val layout = item.layout
-        // Left-to-right: indent on the left. Right-to-left: the text keeps the left margin and the indent goes right.
-        val x = if (rtl) MARGIN_X else MARGIN_X + item.indent
+        val x = MARGIN_X + item.indent
         val top = MARGIN_TOP + slice.y
         val firstTop = layout.getLineTop(slice.fromLine).toFloat()
         val lastBottom = layout.getLineBottom(slice.toLine - 1).toFloat()
@@ -206,14 +195,12 @@ class PdfExporter(private val fonts: BundledFonts, private val language: Languag
         if (slice.fromLine == 0) {
             item.marker?.let { (marker, paint) ->
                 val baseline = top + layout.getLineBaseline(0)
-                val markerX = if (rtl) x + layout.width + paint.measureText(" ") else x - paint.measureText("$marker ")
-                canvas.drawText(marker, markerX, baseline, paint)
+                canvas.drawText(marker, x - paint.measureText("$marker "), baseline, paint)
             }
         }
         if (item.quoteBar) {
             val bar = Paint().apply { color = Color.rgb(0xBB, 0xBB, 0xBB) }
-            val barX = if (rtl) x + layout.width + INDENT * 0.6f - 2f else x - INDENT * 0.6f
-            canvas.drawRect(barX, top, barX + 2f, top + lastBottom - firstTop, bar)
+            canvas.drawRect(x - INDENT * 0.6f, top, x - INDENT * 0.6f + 2f, top + lastBottom - firstTop, bar)
         }
         canvas.save()
         canvas.translate(x, top - firstTop)
