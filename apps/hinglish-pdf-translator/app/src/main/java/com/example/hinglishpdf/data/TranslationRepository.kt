@@ -35,7 +35,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** The Gemini model every chunk is sent to. */
-const val GEMINI_MODEL_NAME = "gemini-1.5-flash"
+const val GEMINI_MODEL_NAME = "gemini-3.5-flash-lite"
 
 /** Progress of one page, streamed as it is translated. */
 sealed interface PageEvent {

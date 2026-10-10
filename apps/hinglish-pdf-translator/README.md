@@ -53,10 +53,9 @@ leaks, delete it in AI Studio and create a new one.
 
 The model is the `GEMINI_MODEL_NAME` constant at the top of
 [`TranslationRepository.kt`](app/src/main/java/com/example/hinglishpdf/data/TranslationRepository.kt)
-(currently `gemini-1.5-flash`). Google's release notes list `gemini-1.5-flash`
-as shut down on 29 September 2025; if the API answers "not found", the app stops
-with a message saying to change that constant (for example to
-`gemini-3.5-flash-lite`, a current free-tier model).
+(`gemini-3.5-flash-lite`, free tier). Retired models such as
+`gemini-1.5-flash` (shut down 29 September 2025) and `gemini-2.0-flash` answer
+"not found"; the app then stops with a message saying to change that constant.
 Check current models and free-tier limits on
 [the pricing page](https://ai.google.dev/gemini-api/docs/pricing) and in AI Studio.
 
