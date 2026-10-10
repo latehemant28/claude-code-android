@@ -11,7 +11,9 @@ import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
-import com.example.hinglishpdf.data.settings.GeminiKeyStore
+import com.example.hinglishpdf.data.ai.AIProvider
+import com.example.hinglishpdf.data.document.DocFormat
+import com.example.hinglishpdf.data.settings.ProviderSettings
 import com.example.hinglishpdf.ui.reader.ReaderFont
 import com.example.hinglishpdf.ui.reader.ReaderStyle
 import com.example.hinglishpdf.service.LiveStatus
@@ -35,11 +37,14 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 data class TranslatorUiState(
-    /** False until a Gemini API key is available (BuildConfig or pasted in the app). */
-    val geminiConfigured: Boolean = false,
-    val geminiKeySource: GeminiKeyStore.Source = GeminiKeyStore.Source.NONE,
-    /** The Gemini model that answered last; null until the first page (picked automatically). */
-    val geminiModel: String? = null,
+    /** The AI provider picked in the app, with each provider's key and model. */
+    val providers: ProviderSettings.State,
+    /** "OpenAI · gpt-4.1-mini": what answered last; null until the first page (picked automatically). */
+    val activeModel: String? = null,
+    /** What "Save to Downloads" writes. */
+    val outputFormat: DocFormat = DocFormat.EPUB,
+    /** When the Terms of Use were accepted; null until then (no translation may start). */
+    val termsAcceptedAt: Long? = null,
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
@@ -50,10 +55,24 @@ data class TranslatorUiState(
     val selected: BookWithProgress?
         get() = books.firstOrNull { it.book.id == selectedBookId } ?: books.firstOrNull()
 
-    val canAddBook: Boolean get() = geminiConfigured && !importing
+    val provider: AIProvider get() = providers.provider
+
+    /** False until the selected provider has an API key. */
+    val configured: Boolean get() = providers.configured
+
+    val termsAccepted: Boolean get() = termsAcceptedAt != null
+
+    val canAddBook: Boolean get() = configured && !importing
 
     fun isRunning(book: BookEntity) = live.running && live.bookId == book.id
 }
+
+private data class Settings(
+    val providers: ProviderSettings.State,
+    val activeModel: String?,
+    val outputFormat: DocFormat,
+    val termsAcceptedAt: Long?,
+)
 
 /** The page in progress, ready to draw: finished blocks plus the streaming micro-chunk. */
 data class LivePage(
@@ -62,7 +81,7 @@ data class LivePage(
     val chunkCount: Int,
     /** Finished blocks of this page, with their structure. */
     val blocks: List<Pair<com.example.hinglishpdf.data.document.DocBlock, String>>,
-    /** The chunk being written right now (Markdown, as Gemini streams it). */
+    /** The chunk being written right now (Markdown, as the AI streams it). */
     val streaming: String,
 ) {
     companion object {
@@ -87,17 +106,26 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
     private val local = MutableStateFlow(LocalState())
 
+    private val settings = combine(
+        app.providers.state,
+        app.activeModel,
+        app.preferences.outputFormat,
+        app.preferences.termsAcceptedAt,
+        ::Settings,
+    )
+
     val state: StateFlow<TranslatorUiState> = combine(
-        combine(app.geminiKey.key, app.activeGeminiModel, ::Pair),
+        settings,
         app.db.bookDao().observeAll(),
         // Only the coarse status here; the per-token text has its own flow below.
         app.monitor.status.map { it.copy(liveText = "", pageTranslations = emptyList()) }.distinctUntilChanged(),
         local,
-    ) { (key, model), books, live, l ->
+    ) { s, books, live, l ->
         TranslatorUiState(
-            geminiConfigured = key.isNotBlank(),
-            geminiModel = model,
-            geminiKeySource = app.geminiKey.source,
+            providers = s.providers,
+            activeModel = s.activeModel,
+            outputFormat = s.outputFormat,
+            termsAcceptedAt = s.termsAcceptedAt,
             books = books,
             selectedBookId = l.selectedBookId,
             live = live,
@@ -107,11 +135,15 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        TranslatorUiState(geminiConfigured = app.geminiConfigured, geminiKeySource = app.geminiKey.source),
+        TranslatorUiState(
+            providers = app.providers.state.value,
+            outputFormat = app.preferences.outputFormat.value,
+            termsAcceptedAt = app.preferences.termsAcceptedAt.value,
+        ),
     )
 
     /**
-     * The page being translated, streamed chunk by chunk from Gemini. The
+     * The page being translated, streamed chunk by chunk from the AI. The
      * text is prepared on Dispatchers.Default (conflated, so a slow frame
      * never backs up the stream) and delivered to Compose on the main thread
      * through viewModelScope.
@@ -132,7 +164,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     init {
         // After a crash, a force-stop or a reboot: pick up where we stopped.
         viewModelScope.launch {
-            if (app.geminiConfigured && !app.monitor.status.value.running &&
+            if (app.translatorConfigured && app.preferences.termsAccepted && !app.monitor.status.value.running &&
                 app.db.bookDao().nextResumable() != null
             ) {
                 TranslationService.start(app)
@@ -149,17 +181,31 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
     fun setReaderTextSize(sp: Float) = app.readerSettings.setTextSize(sp)
 
-    /** Stores a pasted key on this phone (used only when the build has none). */
-    fun saveApiKey(key: String) {
-        app.geminiKey.save(key)
-        showMessage("API key saved on this phone")
+    /** Picks the AI provider (Gemini, OpenAI, Claude, Groq) used for the next request. */
+    fun selectProvider(provider: AIProvider) = app.providers.select(provider)
+
+    /** Stores a pasted key on this phone, for [provider] only. */
+    fun saveApiKey(provider: AIProvider, key: String) {
+        app.providers.saveKey(provider, key)
+        showMessage("${provider.displayName} API key saved on this phone")
     }
 
-    fun removeApiKey() = app.geminiKey.clear()
+    fun removeApiKey(provider: AIProvider) = app.providers.clearKey(provider)
+
+    /** A model to try before the provider's defaults; blank = automatic. */
+    fun setModel(provider: AIProvider, model: String) {
+        app.providers.setModel(provider, model)
+        showMessage(if (model.isBlank()) "Model picked automatically" else "Model set to ${model.trim()}")
+    }
+
+    fun setOutputFormat(format: DocFormat) = app.preferences.setOutputFormat(format)
+
+    /** The user ticked the box and tapped "I Agree". */
+    fun acceptTerms() = app.preferences.acceptTerms()
 
     /** Adds the picked book to the queue and starts the background service. */
     fun addBook(uri: Uri) {
-        if (!state.value.canAddBook) return
+        if (!state.value.canAddBook || !app.preferences.termsAccepted) return
         local.update { it.copy(importing = true) }
         viewModelScope.launch {
             try {
@@ -187,17 +233,19 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
     /** Continues from the first page without a saved translation. */
     fun resume(book: BookEntity) {
+        if (!app.preferences.termsAccepted) return
         viewModelScope.launch {
             app.db.bookDao().setStatus(book.id, BookStatus.QUEUED)
             TranslationService.start(app)
         }
     }
 
-    /** Writes the book (translated so far) to Downloads. */
+    /** Writes the book (translated so far) to Downloads, in the format picked with the toggle. */
     fun saveToDownloads(book: BookEntity) {
+        val format = state.value.outputFormat
         app.appScope.launch {
             val message = try {
-                "Saved to Downloads: ${app.exporter.exportToDownloads(book).displayName}"
+                "Saved to Downloads: ${app.exporter.exportToDownloads(book, format).displayName}"
             } catch (e: Exception) {
                 "Could not save: ${e.message}"
             }

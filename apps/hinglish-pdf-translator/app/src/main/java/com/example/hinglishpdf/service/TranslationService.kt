@@ -90,8 +90,11 @@ class TranslationService : Service() {
         app.monitor.update { LiveStatus(running = true, bookId = id, label = "Starting…") }
         try {
             showProgress(initial, "Starting…", 0, 0)
-            check(app.geminiConfigured) {
-                "No Gemini API key. Paste one in the app, or add GEMINI_API_KEY to local.properties and rebuild."
+            check(app.preferences.termsAccepted) {
+                "Accept the Terms of Use in the app first (menu ⋮ → Terms of Use), then tap Resume."
+            }
+            check(app.translatorConfigured) {
+                "No API key for ${app.providers.state.value.provider.displayName}. Paste one in the app, then tap Resume."
             }
 
             // 1. Extract the pages once. Pages are stored in one transaction, so
@@ -115,7 +118,7 @@ class TranslationService : Service() {
             val book = books.get(id) ?: return
             val unit = book.unitName
 
-            // 2. Translate page by page with Gemini, saving each page immediately.
+            // 2. Translate page by page with the selected AI provider, saving each page immediately.
             while (true) {
                 val page = pages.nextUntranslated(id) ?: break
                 val label = "Translating $unit ${page.pageNumber} of ${book.pageCount}..."
@@ -128,7 +131,7 @@ class TranslationService : Service() {
                 }
                 showProgress(book, label, page.pageNumber - 1, book.pageCount)
 
-                // Gemini's answer streams in; the page is saved only once complete.
+                // The answer streams in; the page is saved only once complete.
                 var translations: List<String?> = emptyList()
                 app.translationRepository.translatePage(page.sourceBlocks).collect { event ->
                     when (event) {
@@ -163,12 +166,14 @@ class TranslationService : Service() {
                 )
             }
 
-            // 3. Build the new PDF/EPUB and save it to Downloads.
-            app.monitor.update { it.copy(label = "Saving to Downloads…", liveText = "", waiting = false) }
-            showProgress(book, "Saving to Downloads…", book.pageCount, book.pageCount)
-            val saved = app.exporter.exportToDownloads(book)
+            // 3. Build the PDF or EPUB (the Output Format toggle) and save it to Downloads.
+            val format = app.preferences.outputFormat.value
+            val saving = "Saving ${format.name} to Downloads…"
+            app.monitor.update { it.copy(label = saving, liveText = "", waiting = false) }
+            showProgress(book, saving, book.pageCount, book.pageCount)
+            val saved = app.exporter.exportToDownloads(book, format)
             books.setStatus(id, BookStatus.COMPLETED)
-            Notifications.finished(this, book.title, saved.displayName, saved.uri, book.format.mimeType)
+            Notifications.finished(this, book.title, saved.displayName, saved.uri, format.mimeType)
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 // Paused by the user: wait for a manual resume. Otherwise (the

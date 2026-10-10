@@ -7,9 +7,11 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.example.hinglishpdf.data.db.AppDatabase
 import com.example.hinglishpdf.data.db.BookEntity
+import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.PdfExporter
 import com.example.hinglishpdf.data.epub.EpubBook
+import com.example.hinglishpdf.data.epub.EpubWriter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -17,30 +19,57 @@ import java.io.IOException
 import java.io.OutputStream
 
 /**
- * Builds the translated file from the pages saved in Room and writes it to
- * the public Downloads folder. PDF -> page-for-page PDF; EPUB -> the same
- * EPUB with its text translated. Pages not translated yet keep their
- * original text, so a paused book can be exported too.
+ * Builds the translated file from the pages saved in Room, in the format
+ * picked with the Output Format toggle, and writes it to the public
+ * Downloads folder:
+ *
+ *  - EPUB from an EPUB: the same EPUB with its text translated (styles,
+ *    images and table of contents kept);
+ *  - EPUB from a PDF: a new EPUB 3, one chapter per top-level heading;
+ *  - PDF from either: A4 pages with the text flowing across them and the
+ *    Noto fonts embedded.
+ *
+ * Pages not translated yet keep their original text, so a paused book can be
+ * exported too.
  */
-class BookExporter(private val context: Context, private val db: AppDatabase) {
+class BookExporter(
+    private val context: Context,
+    private val db: AppDatabase,
+    private val fonts: BundledFonts,
+) {
 
-    data class Saved(val uri: Uri, val displayName: String)
+    data class Saved(val uri: Uri, val displayName: String, val format: DocFormat)
 
-    suspend fun exportToDownloads(book: BookEntity): Saved = withContext(Dispatchers.IO) {
+    suspend fun exportToDownloads(book: BookEntity, format: DocFormat): Saved = withContext(Dispatchers.IO) {
         val pages = db.pageDao().pages(book.id)
-        val name = "${book.title} (Hindi).${book.format.extension}"
-        val uri = saveToDownloads(name, book.format.mimeType) { out ->
-            when (book.format) {
-                DocFormat.PDF -> PdfExporter.write(out, pages)
-                DocFormat.EPUB -> EpubBook.writeTranslated(
+        val name = "${book.title} (Hindi).${format.extension}"
+        val uri = saveToDownloads(name, format.mimeType) { out ->
+            when {
+                format == DocFormat.PDF -> PdfExporter(fonts).write(out, pages, sourceIsPdf = book.format == DocFormat.PDF)
+                book.format == DocFormat.EPUB -> EpubBook.writeTranslated(
                     File(book.sourcePath),
                     out,
                     pages.flatMap { p -> p.translations ?: List(p.sourceBlocks.size) { null } },
                 )
+                else -> EpubWriter.write(
+                    out,
+                    title = book.title,
+                    sections = pages.map { page ->
+                        EpubWriter.Section(
+                            page.pageNumber,
+                            page.sourceBlocks.mapIndexedNotNull { i, block ->
+                                val text = page.translations?.getOrNull(i) ?: block.text
+                                if (text.isBlank()) null else block to text
+                            },
+                        )
+                    },
+                    pageMarkers = true,
+                    fonts = fonts.epubFonts(),
+                )
             }
         }
         db.bookDao().setOutput(book.id, uri.toString(), name)
-        Saved(uri, name)
+        Saved(uri, name, format)
     }
 
     /**

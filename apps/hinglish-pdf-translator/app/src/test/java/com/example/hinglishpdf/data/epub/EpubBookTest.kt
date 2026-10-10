@@ -63,7 +63,7 @@ class EpubBookTest {
             put(
                 "OEBPS/content.opf",
                 """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">
-                   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Test Book</dc:title></metadata>
+                   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Test Book</dc:title><dc:language>en</dc:language></metadata>
                    <manifest>
                      <item id="c1" href="text/ch%201.xhtml" media-type="application/xhtml+xml"/>
                      <item id="c2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
@@ -130,6 +130,12 @@ class EpubBookTest {
             assertTrue(html.contains("""<img src="../images/pic.png" alt="diagram" />"""))
             assertTrue(html.contains("""<ol start="3">"""))
             assertTrue(html.contains("book.css"))
+            assertTrue(html.contains("""xml:lang="hi"""")) // readers pick a Hindi font
+
+            val opf = zip.getInputStream(zip.getEntry("OEBPS/content.opf")).readBytes().toString(Charsets.UTF_8)
+            assertTrue(opf, opf.contains("<dc:language>hi</dc:language>"))
+            assertTrue(opf.contains("<dc:title>Test Book</dc:title>"))
+            assertTrue(opf.contains("""href="text/ch%201.xhtml""""))
         }
     }
 }

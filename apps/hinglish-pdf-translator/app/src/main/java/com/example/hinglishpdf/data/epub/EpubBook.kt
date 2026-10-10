@@ -49,9 +49,10 @@ object EpubBook {
     /**
      * Writes [source] to [target] with each block's text replaced by
      * [translations] (aligned with the blocks returned by [read]; null keeps
-     * the original text).
+     * the original text). Chapters and the package are re-labelled as
+     * [language], so readers pick a Hindi font and shape Devanagari correctly.
      */
-    fun writeTranslated(source: File, target: OutputStream, translations: List<String?>) {
+    fun writeTranslated(source: File, target: OutputStream, translations: List<String?>, language: String = "hi") {
         ZipFile(source).use { zip ->
             val spine = readSpine(zip)
             val chapters = spine.chapters.toSet()
@@ -63,7 +64,15 @@ object EpubBook {
                     val translation = translations.getOrNull(index++)
                     if (translation != null && unit.block.isTranslatable) replaceRun(unit.nodes, translation)
                 }
+                doc.allElements.firstOrNull { it.localName() == "html" }?.let { html ->
+                    html.attr("xml:lang", language)
+                    if (html.hasAttr("lang")) html.attr("lang", language) // XHTML 1.1 (EPUB 2) has no "lang"
+                }
                 rewritten[path] = serialize(doc).toByteArray(Charsets.UTF_8)
+            }
+            readXml(zip, spine.opfPath)?.let { opf ->
+                opf.allElements.filter { it.localName() == "language" }.forEach { it.text(language) }
+                rewritten[spine.opfPath] = serialize(opf).toByteArray(Charsets.UTF_8)
             }
             if (index != translations.size) {
                 throw IOException("EPUB changed since it was read ($index blocks, expected ${translations.size}).")
@@ -86,7 +95,7 @@ object EpubBook {
                 for (entry in zip.entries()) {
                     if (entry.name == "mimetype" || entry.isDirectory) continue
                     out.putNextEntry(ZipEntry(entry.name))
-                    val replacement = if (entry.name in chapters) rewritten[entry.name] else null
+                    val replacement = if (entry.name in chapters || entry.name == spine.opfPath) rewritten[entry.name] else null
                     if (replacement != null) {
                         out.write(replacement)
                     } else {
@@ -100,7 +109,7 @@ object EpubBook {
 
     // ---------------------------------------------------------------- spine
 
-    private data class Spine(val title: String?, val chapters: List<String>)
+    private data class Spine(val title: String?, val chapters: List<String>, val opfPath: String)
 
     private fun readSpine(zip: ZipFile): Spine {
         val container = readXml(zip, "META-INF/container.xml")
@@ -120,7 +129,7 @@ object EpubBook {
             .filter { zip.getEntry(it) != null }
             .distinct()
         val title = opf.allElements.firstOrNull { it.localName() == "title" }?.text()?.takeIf { it.isNotBlank() }
-        return Spine(title, chapters)
+        return Spine(title, chapters, opfPath)
     }
 
     private fun resolve(baseDir: String, href: String): String {

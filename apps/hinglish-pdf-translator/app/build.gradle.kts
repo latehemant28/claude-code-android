@@ -30,8 +30,8 @@ android {
         // Android 10+: MediaStore saves to Downloads without any storage permission.
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "3.3"
+        versionCode = 7
+        versionName = "4.0"
 
         // Quotes and backslashes escaped so any key is a valid Java string literal.
         val escapedKey = geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -111,8 +111,8 @@ dependencies {
     // --- EPUB (XHTML) parsing and rewriting ---
     implementation("org.jsoup:jsoup:1.18.3")
 
-    // --- Translation: Google Gemini API (cloud) ---
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    // --- Translation: Gemini, OpenAI, Anthropic and Groq over their HTTPS APIs ---
+    // (HttpURLConnection + Gson, see data/ai; no provider SDK needed.)
 
     // --- Tests ---
     testImplementation("junit:junit:4.13.2")
@@ -120,4 +120,6 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+    // The W3C EPUB validator: generated EPUBs must pass it.
+    testImplementation("org.w3c:epubcheck:5.1.0")
 }

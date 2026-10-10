@@ -24,6 +24,13 @@ data class DocBlock(
 enum class DocFormat(val mimeType: String, val extension: String) {
     PDF("application/pdf", "pdf"),
     EPUB("application/epub+zip", "epub"),
+    ;
+
+    companion object {
+        /** The format of a saved file, from its name ("Book (Hindi).epub"). */
+        fun ofFileName(name: String?): DocFormat? =
+            entries.firstOrNull { name?.endsWith(".${it.extension}", ignoreCase = true) == true }
+    }
 }
 
 /** A parsed input document; [file] is a private copy kept for exporting. */

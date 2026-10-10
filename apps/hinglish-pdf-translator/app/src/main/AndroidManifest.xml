@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Each chunk of text is translated by the Google Gemini API. -->
+    <!-- Each chunk of text is translated by the AI provider picked in the app (Gemini, OpenAI, Claude, Groq). -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Translation keeps running with the screen locked or the app in the background. -->
@@ -42,7 +42,7 @@
         </activity>
 
         <!--
-            A whole book can take hours (the free Gemini tier is rate-limited),
+            A whole book can take hours (free tiers are rate-limited),
             longer than dataSync allows on Android 15 (6 hours a day), so the
             service is declared as specialUse.
         -->
@@ -52,7 +52,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Translates a user-selected book page by page with the Gemini API" />
+                android:value="Translates a user-selected book page by page with the AI provider the user picked" />
         </service>
     </application>
 

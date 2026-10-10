@@ -27,10 +27,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -39,6 +38,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -50,7 +54,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -76,8 +79,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -88,7 +89,7 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.bulletFor
-import com.example.hinglishpdf.data.settings.GeminiKeyStore
+import com.example.hinglishpdf.data.ai.AIProvider
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +100,12 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     val livePage by viewModel.livePage.collectAsStateWithLifecycle()
     val readerStyle by viewModel.readerStyle.collectAsStateWithLifecycle()
     var showTextSettings by rememberSaveable { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showTerms by rememberSaveable { mutableStateOf(false) }
+    /** Runs once the Terms are accepted (the translation the user was starting). */
+    var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var browserFor by rememberSaveable { mutableStateOf<AIProvider?>(null) }
+    var pastedKey by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -121,6 +128,42 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
         }
     }
 
+    /** No translation starts before the Terms of Use are accepted. */
+    fun withTerms(action: () -> Unit) {
+        if (state.termsAccepted) {
+            action()
+        } else {
+            afterTerms = action
+            showTerms = true
+        }
+    }
+
+    if (showTerms) {
+        TermsDialog(
+            acceptedAt = state.termsAcceptedAt,
+            onAgree = {
+                viewModel.acceptTerms()
+                showTerms = false
+                afterTerms?.invoke()
+                afterTerms = null
+            },
+            onDismiss = {
+                showTerms = false
+                afterTerms = null
+            },
+        )
+    }
+
+    browserFor?.let { provider ->
+        ApiKeyBrowser(provider) { copied ->
+            browserFor = null
+            if (copied != null && !state.providers.configured) {
+                pastedKey = copied
+                viewModel.showMessage("Pasted the key you copied. Check it, then tap Save key.")
+            }
+        }
+    }
+
     if (showTextSettings) {
         ReaderSettingsSheet(
             style = readerStyle,
@@ -140,6 +183,22 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                         IconButton(onClick = { showTextSettings = true }) {
                             Text("Aa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
+                        // Settings menu.
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "Settings")
+                            }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Reading text style") },
+                                    onClick = { showMenu = false; showTextSettings = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Terms of Use & Disclaimer") },
+                                    onClick = { showMenu = false; afterTerms = null; showTerms = true },
+                                )
+                            }
+                        }
                     },
                 )
             },
@@ -150,14 +209,22 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item(key = "gemini") {
-                    GeminiCard(
-                        configured = state.geminiConfigured,
-                        source = state.geminiKeySource,
-                        modelName = state.geminiModel,
+                item(key = "format") {
+                    OutputFormatSelector(state.outputFormat, onSelect = viewModel::setOutputFormat)
+                }
+
+                item(key = "provider") {
+                    ProviderCard(
+                        settings = state.providers,
+                        activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
                         busy = state.live.running,
+                        pastedKey = pastedKey,
+                        onPastedKeyShown = { pastedKey = null },
+                        onSelect = viewModel::selectProvider,
+                        onGetKey = { browserFor = it },
                         onSaveKey = viewModel::saveApiKey,
                         onRemoveKey = viewModel::removeApiKey,
+                        onSetModel = viewModel::setModel,
                     )
                 }
 
@@ -166,9 +233,12 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                         enabled = state.canAddBook,
                         importing = state.importing,
                         onPick = {
-                            // Some file managers label EPUBs as generic binaries.
-                            bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+                            withTerms {
+                                // Some file managers label EPUBs as generic binaries.
+                                bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+                            }
                         },
+                        onShowTerms = { afterTerms = null; showTerms = true },
                     )
                 }
 
@@ -184,14 +254,16 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                             liveLabel = state.live.label.takeIf { state.isRunning(entry.book) },
                             onSelect = { viewModel.select(entry.book.id) },
                             onPause = viewModel::pause,
-                            onResume = { viewModel.resume(entry.book) },
+                            onResume = { withTerms { viewModel.resume(entry.book) } },
+                            saveFormat = state.outputFormat,
                             onSave = { viewModel.saveToDownloads(entry.book) },
                             onOpen = {
                                 val uri = entry.book.outputUri ?: return@BookCard
+                                val format = DocFormat.ofFileName(entry.book.outputName) ?: entry.book.format
                                 try {
                                     context.startActivity(
                                         Intent(Intent.ACTION_VIEW)
-                                            .setDataAndType(Uri.parse(uri), entry.book.format.mimeType)
+                                            .setDataAndType(Uri.parse(uri), format.mimeType)
                                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
                                     )
                                 } catch (e: Exception) {
@@ -236,58 +308,11 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 }
 
 @Composable
-private fun GeminiCard(
-    configured: Boolean,
-    source: GeminiKeyStore.Source,
-    modelName: String?,
-    busy: Boolean,
-    onSaveKey: (String) -> Unit,
-    onRemoveKey: () -> Unit,
-) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Cloud, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                // The model is picked automatically from GEMINI_MODELS (fallback order).
-                Text("Google Gemini · ${modelName ?: "model picked automatically"}", style = MaterialTheme.typography.titleSmall)
-            }
-            if (configured) {
-                Text(
-                    "Ready. Needs an internet connection. Each page's text is sent to Google " +
-                        "to be translated; on the free tier Google may use it to improve its products.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (source == GeminiKeyStore.Source.ENTERED_IN_APP) {
-                    TextButton(onClick = onRemoveKey, enabled = !busy) { Text("Remove saved API key") }
-                }
-            } else {
-                var key by rememberSaveable { mutableStateOf("") }
-                Text(
-                    "Paste your Gemini API key from Google AI Studio. It is kept only on this phone.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it.trim() },
-                    label = { Text("Gemini API key") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(onClick = { onSaveKey(key) }, enabled = key.length >= 20) { Text("Save key") }
-            }
-        }
-    }
-}
-
-@Composable
 private fun NewBookCard(
     enabled: Boolean,
     importing: Boolean,
     onPick: () -> Unit,
+    onShowTerms: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -303,6 +328,39 @@ private fun NewBookCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(
+                "For personal use, with documents you have the rights to. Terms of Use",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClick = onShowTerms),
+            )
+        }
+    }
+}
+
+/** "Output Format: [ PDF | EPUB ]": what Save to Downloads writes. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OutputFormatSelector(format: DocFormat, onSelect: (DocFormat) -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Output Format:", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.width(12.dp))
+            val options = listOf(DocFormat.PDF, DocFormat.EPUB)
+            SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+                options.forEachIndexed { index, option ->
+                    SegmentedButton(
+                        selected = option == format,
+                        onClick = { onSelect(option) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    ) {
+                        Text(option.name)
+                    }
+                }
+            }
         }
     }
 }
@@ -317,6 +375,7 @@ private fun BookCard(
     onSelect: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
+    saveFormat: DocFormat,
     onSave: () -> Unit,
     onOpen: () -> Unit,
     onCopy: () -> Unit,
@@ -376,7 +435,7 @@ private fun BookCard(
                         FilledTonalButton(onClick = onSave) {
                             Icon(Icons.Filled.Save, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
-                            Text("Save to Downloads")
+                            Text("Save ${saveFormat.name} to Downloads")
                         }
                         IconButton(onClick = onCopy) { Icon(Icons.Filled.ContentCopy, contentDescription = "Copy text") }
                     }

@@ -1,11 +1,9 @@
 package com.example.hinglishpdf.data
 
+import com.example.hinglishpdf.data.ai.AITranslator
+import com.example.hinglishpdf.data.ai.TranslatorException
 import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
-import com.google.ai.client.generativeai.type.InvalidAPIKeyException
-import com.google.ai.client.generativeai.type.QuotaExceededException
-import com.google.ai.client.generativeai.type.SerializationException
-import com.google.ai.client.generativeai.type.ServerException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -14,12 +12,9 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
-import java.io.IOException
-import java.net.UnknownHostException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TranslationRepositoryTest {
@@ -30,7 +25,7 @@ class TranslationRepositoryTest {
      * (1-based) misbehave.
      */
     private class FakeGemini(private val script: (request: Int, blocks: Int) -> Fault = { _, _ -> Fault.NONE }) :
-        HinglishModel {
+        AITranslator {
         val prompts = mutableListOf<String>()
 
         override fun translate(chunk: String): Flow<String> = flow {
@@ -41,10 +36,10 @@ class TranslationRepositoryTest {
                 marker to "HI(${block.removePrefix(marker)})"
             }.toMutableList()
             when (script(prompts.size, blocks.size)) {
-                Fault.RATE_LIMIT -> throw GeminiException.Transient("Gemini rate limit reached", retryAfterMillis = 20_000, rateLimited = true)
-                Fault.DAILY_QUOTA -> throw GeminiException.DailyQuota()
-                Fault.BLOCKED -> throw GeminiException.Blocked("SAFETY")
-                Fault.BAD_KEY -> throw GeminiException.Fatal("Gemini rejected the API key.")
+                Fault.RATE_LIMIT -> throw TranslatorException.Transient("Gemini rate limit reached", retryAfterMillis = 20_000, rateLimited = true)
+                Fault.DAILY_QUOTA -> throw TranslatorException.DailyQuota()
+                Fault.BLOCKED -> throw TranslatorException.Blocked("SAFETY")
+                Fault.BAD_KEY -> throw TranslatorException.Fatal("Gemini rejected the API key.")
                 Fault.DEVANAGARI_IN_LAST -> out[out.lastIndex] = out.last().first to "जल्दी निकलना"
                 Fault.MERGES_PARAGRAPHS -> {
                     out[1] = "" to out[1].second + " " + out[2].second
@@ -153,36 +148,28 @@ class TranslationRepositoryTest {
             try {
                 repository(FakeGemini { _, _ -> fault }).translatePage(page).toList()
                 fail("expected $fault to stop the page")
-            } catch (e: GeminiException) {
-                assertTrue(e is GeminiException.DailyQuota || e is GeminiException.Fatal)
+            } catch (e: TranslatorException) {
+                assertTrue(e is TranslatorException.DailyQuota || e is TranslatorException.Fatal)
             }
         }
     }
 
     @Test
-    fun `sdk errors are sorted into what to do`() {
-        val classify = { e: Throwable -> GeminiHinglishModel.classify(e, "gemini-x") }
-
-        val perMinute = classify(QuotaExceededException("Quota exceeded for metric ... Please retry in 23.4s.", null))
-        assertTrue(perMinute is GeminiException.Transient && perMinute.rateLimited)
-        assertEquals(24_400L, (perMinute as GeminiException.Transient).retryAfterMillis)
-
-        assertTrue(classify(QuotaExceededException("quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier", null)) is GeminiException.DailyQuota)
-        assertTrue(classify(InvalidAPIKeyException("API key not valid", null)) is GeminiException.Fatal)
-        val noFreeQuota = classify(
-            QuotaExceededException("Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-x", null),
+    fun `the pause after a chunk follows the selected provider`() = runTest {
+        var pause = 4_500L
+        val repo = TranslationRepository(
+            FakeGemini(),
+            RequestPacer(minIntervalMillis = 0, now = { testScheduler.currentTime }),
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            chunkPauseMillis = { pause },
         )
-        assertTrue(noFreeQuota is GeminiException.ModelUnavailable) // skip it, don't wait for it
-        val retired = classify(ServerException("models/gemini-x is not found for API version v1beta", null))
-        assertTrue(retired is GeminiException.ModelUnavailable) // the fallback moves on to the next model
-        assertTrue((classify(ServerException("429 RESOURCE_EXHAUSTED", null)) as GeminiException.Transient).rateLimited)
-        assertTrue(classify(ServerException("503 The model is overloaded", null)) is GeminiException.Transient)
-        assertTrue(classify(RuntimeException("wrapped", UnknownHostException("generativelanguage.googleapis.com"))) is GeminiException.Transient)
-        assertTrue(classify(IOException("connection reset")) is GeminiException.Transient)
-        val unreadable = classify(
-            SerializationException("Something went wrong while trying to deserialize a response from the server.", null),
-        )
-        assertTrue(unreadable is GeminiException.Transient && !unreadable.rateLimited) // retried, not a book stop
-        assertNull((classify(ServerException("500 internal", null)) as GeminiException.Transient).retryAfterMillis)
+        val start = testScheduler.currentTime
+        repo.translatePage(page).toList()
+        assertEquals(4_500L, testScheduler.currentTime - start)
+
+        pause = 1_000L // e.g. switched to a paid provider
+        val second = testScheduler.currentTime
+        repo.translatePage(page).toList()
+        assertEquals(1_000L, testScheduler.currentTime - second)
     }
 }
