@@ -76,6 +76,16 @@ class HinglishPromptTest {
     }
 
     @Test
+    fun `reasoning a model writes into its answer is removed`() {
+        val raw = "<think>\nThe user wants Hindi. Five blocks.\n\n- keep markers\n</think>\n" +
+            "## Shuru karte hain\n\nPehle, hume plan karna hoga.\n\n- App open karo\n\n  - Settings pe tap karo\n\n3. File save kar do"
+        assertEquals(
+            listOf("Shuru karte hain", "Pehle, hume plan karna hoga.", "App open karo", "Settings pe tap karo", "File save kar do"),
+            HinglishPrompt.parse(raw, units),
+        )
+    }
+
+    @Test
     fun `a style-example label and wrapping quotes are removed, real quotations kept`() {
         val one = listOf(unit(BlockKind.PARAGRAPH, "A young man went to visit the philosopher."))
         assertEquals(

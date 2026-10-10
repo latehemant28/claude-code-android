@@ -84,6 +84,7 @@ object HinglishPrompt {
     private fun stripFiller(raw: String): String {
         var text = raw.replace("\r\n", "\n").trim()
         text = text.replace(CODE_FENCE, "")
+        text = text.replace(THINKING, "") // some models write their reasoning into the answer
         text = text.replace(XML_TAG, "")
         text = text.trim().replace(PREAMBLE, "")
         text = text.replace(LABEL, "")
@@ -145,6 +146,7 @@ object HinglishPrompt {
     private val BLANK_LINE = Regex("\\n[ \\t]*\\n")
     private val STARTS_BLOCK = Regex("^(#{1,6}\\s|[-*•]\\s|\\(?\\d{1,3}[.)]\\s|>\\s?)")
     private val CODE_FENCE = Regex("^```[a-zA-Z]*\\s*$", RegexOption.MULTILINE)
+    private val THINKING = Regex("<think(ing)?>.*?</think(ing)?>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val XML_TAG = Regex("</?(input|output|translation)>", RegexOption.IGNORE_CASE)
     private val PREAMBLE = Regex("^(here is|here's|sure)[^\\n]*:\\s*\\n", RegexOption.IGNORE_CASE)
     private val LABEL = Regex("^((modern |good )?(hindi|hinglish)|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)

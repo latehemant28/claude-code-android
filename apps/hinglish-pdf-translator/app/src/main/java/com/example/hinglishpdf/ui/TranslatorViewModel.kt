@@ -190,6 +190,12 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         showMessage("${provider.displayName} API key saved on this phone")
     }
 
+    /** The Custom (OpenAI-compatible) provider: its address, key and model, kept on this phone. */
+    fun saveCustomProvider(url: String, key: String, model: String) {
+        app.providers.saveCustom(url, key, model)
+        showMessage("Custom AI saved on this phone")
+    }
+
     fun removeApiKey(provider: AIProvider) = app.providers.clearKey(provider)
 
     /** A model to try before the provider's defaults; blank = automatic. */

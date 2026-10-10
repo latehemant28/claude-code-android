@@ -57,7 +57,8 @@ fun ApiKeyBrowser(provider: AIProvider, onClose: (copiedKey: String?) -> Unit) {
     val context = LocalContext.current
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
-    var url by remember { mutableStateOf(provider.keyPageUrl) }
+    val keyPage = provider.keyPageUrl.orEmpty() // only opened for providers that have a key page
+    var url by remember { mutableStateOf(keyPage) }
 
     fun close() {
         CookieManager.getInstance().flush()
@@ -116,7 +117,7 @@ fun ApiKeyBrowser(provider: AIProvider, onClose: (copiedKey: String?) -> Unit) {
                             onProgress = { progress = it },
                             onUrl = { url = it },
                         ).also {
-                            it.loadUrl(provider.keyPageUrl)
+                            it.loadUrl(keyPage)
                             webView = it
                         }
                     },

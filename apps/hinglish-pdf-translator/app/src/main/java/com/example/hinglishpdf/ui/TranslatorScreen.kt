@@ -223,6 +223,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                         onSelect = viewModel::selectProvider,
                         onGetKey = { browserFor = it },
                         onSaveKey = viewModel::saveApiKey,
+                        onSaveCustom = viewModel::saveCustomProvider,
                         onRemoveKey = viewModel::removeApiKey,
                         onSetModel = viewModel::setModel,
                     )

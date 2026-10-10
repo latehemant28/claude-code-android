@@ -151,6 +151,11 @@ abstract class HttpStreamingTranslator(
         fun retryAfterMillis(header: String?): Long? =
             header?.trim()?.toDoubleOrNull()?.let { (it * 1000).toLong() + 500 }
 
+        /** The whole answer as a JSON object, or null if it is not one. */
+        fun jsonBody(body: String): JsonObject? = runCatching {
+            JsonParser.parseString(body).takeIf { it.isJsonObject }?.asJsonObject
+        }.getOrNull()
+
         /** The JSON object in an error answer, or null if the body is not JSON. */
         fun errorObject(body: String): JsonObject? = runCatching {
             JsonParser.parseString(body).takeIf { it.isJsonObject }?.asJsonObject

@@ -52,7 +52,7 @@ class HinglishApp : Application() {
     /** "OpenAI · gpt-4.1-mini": the provider and model that answered last; null before the first page. */
     val activeModel = MutableStateFlow<String?>(null)
 
-    private data class EngineKey(val provider: AIProvider, val apiKey: String, val models: List<String>)
+    private data class EngineKey(val provider: AIProvider, val apiKey: String, val models: List<String>, val customUrl: String)
 
     /**
      * One fallback engine (models tried in order) for the selected provider,
@@ -66,10 +66,10 @@ class HinglishApp : Application() {
     private fun translator(): FallbackTranslator {
         val settings = providers.state.value
         val provider = settings.provider
-        val key = EngineKey(provider, settings.key, provider.models(settings.customModel(provider)))
+        val key = EngineKey(provider, settings.key, provider.models(settings.customModel(provider)), settings.customUrl)
         engine?.let { (k, e) -> if (k == key) return e }
         val fallback = FallbackTranslator(key.models, provider.displayName) { model ->
-            provider.createTranslator(key.apiKey, model)
+            provider.createTranslator(key.apiKey, model, key.customUrl)
         }
         engineWatcher?.cancel()
         engineWatcher = appScope.launch {

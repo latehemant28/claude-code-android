@@ -157,5 +157,18 @@ class FallbackTranslatorTest {
         assertTrue(AIProvider.OPENAI.createTranslator("k", "m") is OpenAITranslator)
         assertTrue(AIProvider.ANTHROPIC.createTranslator("k", "m") is AnthropicTranslator)
         assertTrue(AIProvider.GROQ.createTranslator("k", "m") is GroqTranslator)
+        assertTrue(AIProvider.SARVAM.createTranslator("k", "m") is SarvamTranslator)
+        assertTrue(AIProvider.OPENROUTER.createTranslator("k", "m") is OpenRouterTranslator)
+        assertTrue(AIProvider.CEREBRAS.createTranslator("k", "m") is CerebrasTranslator)
+        assertTrue(AIProvider.MISTRAL.createTranslator("k", "m") is MistralTranslator)
+        assertTrue(AIProvider.DEEPSEEK.createTranslator("k", "m") is DeepSeekTranslator)
+        assertTrue(AIProvider.XAI.createTranslator("k", "m") is XAITranslator)
+        assertTrue(AIProvider.COHERE.createTranslator("k", "m") is CohereTranslator)
+        assertTrue(AIProvider.CUSTOM.createTranslator("k", "m", "https://example.com/v1") is CustomTranslator)
+        // Every provider but Custom has models to fall back on, and a page to get a key.
+        AIProvider.entries.filter { it != AIProvider.CUSTOM }.forEach {
+            assertTrue(it.name, it.defaultModels.isNotEmpty() && it.keyPageUrl!!.startsWith("https://"))
+        }
+        assertEquals(listOf("my-model"), AIProvider.CUSTOM.models("my-model"))
     }
 }

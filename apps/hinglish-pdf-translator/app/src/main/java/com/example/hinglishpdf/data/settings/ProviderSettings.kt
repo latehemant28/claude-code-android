@@ -3,6 +3,7 @@ package com.example.hinglishpdf.data.settings
 import android.content.Context
 import com.example.hinglishpdf.BuildConfig
 import com.example.hinglishpdf.data.ai.AIProvider
+import com.example.hinglishpdf.data.ai.CustomTranslator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,8 @@ class ProviderSettings(context: Context) {
         val provider: AIProvider,
         private val keys: Map<AIProvider, String>,
         private val models: Map<AIProvider, String>,
+        /** The address typed for the Custom (OpenAI-compatible) provider. */
+        val customUrl: String = "",
     ) {
         fun key(p: AIProvider): String =
             if (p == AIProvider.GEMINI) BuildConfig.GEMINI_API_KEY.ifBlank { keys[p].orEmpty() } else keys[p].orEmpty()
@@ -34,7 +37,13 @@ class ProviderSettings(context: Context) {
         fun customModel(p: AIProvider): String = models[p].orEmpty()
 
         val key: String get() = key(provider)
-        val configured: Boolean get() = key.isNotBlank()
+
+        /** Custom also needs a valid https:// address and a model name (it has no defaults). */
+        val configured: Boolean
+            get() = key.isNotBlank() && (
+                provider != AIProvider.CUSTOM ||
+                    (CustomTranslator.chatCompletionsUrl(customUrl) != null && customModel(provider).isNotBlank())
+                )
     }
 
     private val prefs = context.getSharedPreferences("providers", Context.MODE_PRIVATE)
@@ -65,6 +74,16 @@ class ProviderSettings(context: Context) {
 
     fun clearKey(provider: AIProvider) = saveKey(provider, "")
 
+    /** Saves the Custom provider's address, key and model together. */
+    fun saveCustom(url: String, apiKey: String, model: String) {
+        prefs.edit()
+            .putString(CUSTOM_URL, url.trim())
+            .putString(keyName(AIProvider.CUSTOM), apiKey.trim())
+            .putString(modelName(AIProvider.CUSTOM), model.trim())
+            .apply()
+        _state.value = read()
+    }
+
     fun setModel(provider: AIProvider, model: String) {
         prefs.edit().putString(modelName(provider), model.trim()).apply()
         _state.value = read()
@@ -74,6 +93,7 @@ class ProviderSettings(context: Context) {
         provider = runCatching { AIProvider.valueOf(prefs.getString(SELECTED, null)!!) }.getOrDefault(AIProvider.GEMINI),
         keys = AIProvider.entries.associateWith { prefs.getString(keyName(it), "").orEmpty() },
         models = AIProvider.entries.associateWith { prefs.getString(modelName(it), "").orEmpty() },
+        customUrl = prefs.getString(CUSTOM_URL, "").orEmpty(),
     )
 
     private fun keyName(p: AIProvider) = "key_${p.name}"
@@ -81,5 +101,6 @@ class ProviderSettings(context: Context) {
 
     private companion object {
         const val SELECTED = "selected_provider"
+        const val CUSTOM_URL = "custom_url"
     }
 }

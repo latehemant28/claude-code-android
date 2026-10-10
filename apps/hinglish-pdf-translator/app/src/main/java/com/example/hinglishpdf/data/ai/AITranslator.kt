@@ -9,7 +9,8 @@ import kotlinx.coroutines.flow.flow
 /**
  * The translation strategy: one implementation per AI provider
  * ([GeminiTranslator], [OpenAITranslator], [AnthropicTranslator],
- * [GroqTranslator]), each with its own endpoint, headers and JSON. The
+ * [GroqTranslator], and the OpenAI-compatible ones in MoreProviders.kt),
+ * each with its own endpoint, headers and JSON. The
  * pipeline only sees this interface, so it can also be tested without the
  * network.
  *

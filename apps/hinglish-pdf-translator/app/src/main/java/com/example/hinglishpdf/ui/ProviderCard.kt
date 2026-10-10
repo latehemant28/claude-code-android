@@ -38,12 +38,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.ai.AIProvider
+import com.example.hinglishpdf.data.ai.CustomTranslator
 import com.example.hinglishpdf.data.settings.ProviderSettings
 
 /**
  * Picks the AI provider, and holds its API key: "Get API key" opens the
  * provider's own key page in the in-app browser; a key copied there is
- * pasted into the field when the browser closes.
+ * pasted into the field when the browser closes. The Custom provider takes
+ * an address, a key and a model name instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,6 +59,8 @@ fun ProviderCard(
     onSelect: (AIProvider) -> Unit,
     onGetKey: (AIProvider) -> Unit,
     onSaveKey: (AIProvider, String) -> Unit,
+    /** Custom provider: address, key and model, saved together. */
+    onSaveCustom: (url: String, key: String, model: String) -> Unit,
     onRemoveKey: (AIProvider) -> Unit,
     onSetModel: (AIProvider, String) -> Unit,
 ) {
@@ -89,7 +93,7 @@ fun ProviderCard(
                                 Column {
                                     Text(option.displayName)
                                     Text(
-                                        if (settings.key(option).isNotBlank()) "Key saved" else "No key yet",
+                                        "${option.cost} · ${if (settings.key(option).isNotBlank()) "Key saved" else "No key yet"}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -111,6 +115,9 @@ fun ProviderCard(
                     "Ready · ${activeModel ?: "model picked automatically"}",
                     style = MaterialTheme.typography.titleSmall,
                 )
+                if (provider == AIProvider.CUSTOM) {
+                    Text("Address: ${settings.customUrl}", style = MaterialTheme.typography.bodySmall)
+                }
                 Text(
                     "Needs an internet connection. ${provider.dataNote}",
                     style = MaterialTheme.typography.bodySmall,
@@ -126,6 +133,8 @@ fun ProviderCard(
                     )
                     ProviderSettings.KeySource.NONE -> Unit
                 }
+            } else if (provider == AIProvider.CUSTOM) {
+                CustomProviderForm(settings, onSaveCustom)
             } else {
                 var key by rememberSaveable(provider) { mutableStateOf("") }
                 LaunchedEffect(pastedKey) {
@@ -138,10 +147,12 @@ fun ProviderCard(
                     "Paste your ${provider.displayName} API key. It is kept only on this phone.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                FilledTonalButton(onClick = { onGetKey(provider) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Filled.Key, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Get API Key")
+                if (provider.keyPageUrl != null) {
+                    FilledTonalButton(onClick = { onGetKey(provider) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.Key, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Get API Key")
+                    }
                 }
                 OutlinedTextField(
                     value = key,
@@ -160,29 +171,95 @@ fun ProviderCard(
                 Button(onClick = { onSaveKey(provider, key) }, enabled = key.length >= 20) { Text("Save key") }
             }
 
-            // 3. Optional model name, tried before the defaults.
-            var model by rememberSaveable(provider, settings.customModel(provider)) {
-                mutableStateOf(settings.customModel(provider))
-            }
-            val changed = model.trim() != settings.customModel(provider)
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it },
-                label = { Text("Model (optional)") },
-                placeholder = { Text("Automatic: ${provider.defaultModels.first()}") },
-                supportingText = { Text("Leave empty to try ${provider.defaultModels.joinToString()} in turn.") },
-                singleLine = true,
-                enabled = !busy,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                trailingIcon = {
-                    if (changed) {
-                        IconButton(onClick = { onSetModel(provider, model) }) {
-                            Icon(Icons.Filled.Check, contentDescription = "Use this model")
+            // 3. Optional model name, tried before the defaults (Custom: part of its form until saved).
+            if (provider != AIProvider.CUSTOM || settings.configured) {
+                var model by rememberSaveable(provider, settings.customModel(provider)) {
+                    mutableStateOf(settings.customModel(provider))
+                }
+                val changed = model.trim() != settings.customModel(provider)
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text(if (provider.defaultModels.isEmpty()) "Model" else "Model (optional)") },
+                    placeholder = provider.defaultModels.firstOrNull()?.let { first -> { Text("Automatic: $first") } },
+                    supportingText = {
+                        Text(
+                            if (provider.defaultModels.isEmpty()) {
+                                "The model name your service uses."
+                            } else {
+                                "Leave empty to try ${provider.defaultModels.joinToString()} in turn."
+                            },
+                        )
+                    },
+                    singleLine = true,
+                    enabled = !busy,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    trailingIcon = {
+                        if (changed) {
+                            IconButton(onClick = { onSetModel(provider, model) }) {
+                                Icon(Icons.Filled.Check, contentDescription = "Use this model")
+                            }
                         }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
+}
+
+/**
+ * Any other AI service with an OpenAI-compatible API (Together, Fireworks,
+ * Qwen's Model Studio, Moonshot, a company's own server...): its address,
+ * key and model name, saved together.
+ */
+@Composable
+private fun CustomProviderForm(settings: ProviderSettings.State, onSave: (url: String, key: String, model: String) -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    var url by rememberSaveable { mutableStateOf(settings.customUrl) }
+    var key by rememberSaveable { mutableStateOf("") }
+    var model by rememberSaveable { mutableStateOf(settings.customModel(AIProvider.CUSTOM)) }
+    val urlValid = CustomTranslator.chatCompletionsUrl(url) != null
+    Text(
+        "Any AI service with an OpenAI-compatible API. Enter its address, your key and the model name.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    OutlinedTextField(
+        value = url,
+        onValueChange = { url = it.trim() },
+        label = { Text("API address") },
+        placeholder = { Text("https://example.com/v1") },
+        supportingText = {
+            Text(if (url.isBlank() || urlValid) "The address before /chat/completions." else "Must start with https://")
+        },
+        isError = url.isNotBlank() && !urlValid,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = key,
+        onValueChange = { key = it.trim() },
+        label = { Text("API key") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        trailingIcon = {
+            IconButton(onClick = { clipboard.getText()?.text?.trim()?.let { key = it } }) {
+                Icon(Icons.Filled.ContentPaste, contentDescription = "Paste")
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = model,
+        onValueChange = { model = it },
+        label = { Text("Model") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Button(
+        onClick = { onSave(url, key, model) },
+        enabled = urlValid && key.isNotBlank() && model.isNotBlank(),
+    ) { Text("Save") }
 }

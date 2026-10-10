@@ -2,14 +2,18 @@
 
 An Android app that translates whole books (PDFs and EPUBs) into natural,
 conversational **Hindi in Devanagari** (हिंदी), the way modern urban Indians
-speak, page by page, in the background, with the AI provider you choose:
-**Google Gemini**, **OpenAI**, **Anthropic Claude** or **Groq**.
+speak, page by page, in the background, with the AI provider you choose: **Google
+Gemini**, **Sarvam AI**, **Groq**, **OpenRouter**, **Cerebras**, **Mistral
+AI**, **DeepSeek**, **OpenAI**, **Anthropic Claude**, **xAI Grok**,
+**Cohere**, or any other service with an OpenAI-compatible API (**Custom**).
 
 - **Context-aware:** adapts आप / तुम and the tone to the book's genre, uses
   everyday English words written in Devanagari (ऑप्शन, प्लान) instead of
   bookish Hindi, and keeps speaker labels, names and "Chapter 1" in English.
-- **Any of four providers:** pick one from a dropdown; each has its own
-  translator class (Strategy pattern) for its endpoint and JSON. **Get API
+- **Twelve providers:** pick one from a dropdown (each shows whether it is
+  free or paid); each has its own translator class (Strategy pattern) for
+  its endpoint and JSON. OpenRouter alone reaches 400+ models (Qwen, Kimi,
+  GLM, Llama, Gemma...) with one key. **Get API
   Key** opens the provider's own key page inside the app; copy a key there,
   close it, and the key is pasted for you.
 - **PDF or EPUB output:** an **Output Format: [ PDF | EPUB ]** toggle (EPUB
@@ -40,16 +44,29 @@ Android's `PdfDocument` for writing PDFs, and `java.util.zip` for EPUBs.
 
 At the top of the screen:
 
-1. **AI provider** dropdown: Google Gemini, OpenAI, Anthropic Claude or Groq.
+1. **AI provider** dropdown: the providers below, each with a word on cost.
 2. **Get API Key** opens that provider's official key dashboard in an in-app
    browser:
 
    | Provider | Key page | Cost |
    |---|---|---|
    | Google Gemini | https://aistudio.google.com/app/apikey | Free tier (rate-limited) |
+   | Sarvam AI (India) | https://dashboard.sarvam.ai (API Keys) | Paid from credits; free credits on sign-up |
+   | Groq | https://console.groq.com/keys | Free tier (small limits) |
+   | OpenRouter | https://openrouter.ai/keys | Free models (50 requests a day, 1,000 after buying 10 credits); others paid |
+   | Cerebras | https://cloud.cerebras.ai | Free tier (5 requests a minute, 1M tokens a day) |
+   | Mistral AI | https://console.mistral.ai/api-keys | Free Experiment plan; paid plans |
+   | DeepSeek | https://platform.deepseek.com/api_keys | Paid per use (low cost) |
    | OpenAI | https://platform.openai.com/api-keys | Paid per use |
    | Anthropic Claude | https://console.anthropic.com/settings/keys | Paid per use |
-   | Groq | https://console.groq.com/keys | Free tier (small limits) |
+   | xAI Grok | https://console.x.ai/team/default/api-keys | Paid per use |
+   | Cohere | https://dashboard.cohere.com/api-keys | Free trial key (20 a minute, 1,000 a month) |
+   | Custom | (your service's own) | Any OpenAI-compatible API |
+
+   **Custom** has no key page: type the service's **API address** (https
+   only, e.g. `https://example.com/v1`; `/chat/completions` is added), its
+   key and the model name, then tap **Save**. Use it for Together,
+   Fireworks, Qwen's Model Studio, Moonshot, a company's own server...
 
    Sign in, create a key, tap the site's **Copy** button, and close the
    browser (✕). If the clipboard holds something that looks like a key, it is
@@ -90,6 +107,8 @@ be extracted by anyone who has that APK, so don't publish such an APK.
 | `GeminiTranslator` | `…/v1beta/models/{model}:streamGenerateContent?alt=sse` (`x-goog-api-key`) | `systemInstruction` | `candidates[0].content.parts[].text` (thoughts skipped) |
 | `OpenAITranslator` | `api.openai.com/v1/chat/completions` (Bearer) | `system` message | `choices[0].delta.content` |
 | `GroqTranslator` | `api.groq.com/openai/v1/chat/completions` (Bearer) | `system` message | `choices[0].delta.content` |
+| `SarvamTranslator` | `api.sarvam.ai/v1/chat/completions` (`api-subscription-key` + Bearer; reasoning off, `max_tokens` 8192) | `system` message | `choices[0].delta.content` |
+| `OpenRouterTranslator`, `CerebrasTranslator`, `MistralTranslator`, `DeepSeekTranslator`, `XAITranslator`, `CohereTranslator`, `CustomTranslator` | each provider's OpenAI-compatible `…/chat/completions` (Bearer) | `system` message | `choices[0].delta.content` |
 | `AnthropicTranslator` | `api.anthropic.com/v1/messages` (`x-api-key`, `anthropic-version`) | `system` | `content_block_delta` events |
 
 `AIProvider.createTranslator()` instantiates the right class for the
@@ -108,6 +127,14 @@ Each provider has a prioritized list (`AIProvider.defaultModels`):
 | OpenAI | `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-5-mini` |
 | Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` |
 | Groq | `llama-3.3-70b-versatile`, `openai/gpt-oss-120b` |
+| Sarvam AI | `sarvam-105b`, `sarvam-105b-conversations` |
+| OpenRouter | `google/gemma-4-31b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `google/gemma-4-26b-a4b-it:free`, `openrouter/free` |
+| Cerebras | `gpt-oss-120b`, `qwen-3.8-27b` |
+| Mistral AI | `mistral-medium-latest`, `mistral-small-latest`, `mistral-large-latest` |
+| DeepSeek | `deepseek-flash`, `deepseek-v4-pro` |
+| xAI Grok | `grok-4.20-0309-non-reasoning`, `grok-4.3`, `grok-4.7` |
+| Cohere | `command-a-plus-05-2026`, `command-a-03-2025` |
+| Custom | the model typed in the app |
 
 A model typed in the app's Model field is tried first. `FallbackTranslator`
 tries them in order and moves on silently when a model fails in a way
@@ -210,12 +237,12 @@ paces requests and handles errors as follows:
 
 | Situation | What the app does |
 |---|---|
-| Every chunk | A fixed pause after each translated chunk: **4.5 s** for Gemini and Groq (about 13 requests a minute, under Gemini's free 15), 1 s for OpenAI and Claude |
-| Rate limit (429) | Another model of the provider is tried first; if all are limited, **waits** (60 s for Gemini, 30 s Groq, 20 s OpenAI/Claude, or longer if the provider asks) and tries again, **with no retry limit**. The notification shows the provider's own message |
+| Every chunk | A fixed pause after each translated chunk: **4.5 s** for Gemini and Groq (about 13 requests a minute, under Gemini's free 15), 12 s Cerebras (5 a minute), 3.5 s OpenRouter and Cohere, 2 s Mistral, 1.5 s Sarvam, 1 s the paid ones; never less than 4 s between two requests |
+| Rate limit (429) | Another model of the provider is tried first; if all are limited, **waits** (60 s for Gemini, OpenRouter, Cerebras and Cohere, 30 s Groq and Mistral, 20 s for the others, or longer if the provider asks) and tries again, **with no retry limit**. The notification shows the provider's own message |
 | "limit: 0" (no quota for this model and key) | The model is skipped for the session, like a retired one |
 | Daily quota used up | Stops the book with a clear message; **Resume** later continues at the same page |
 | Network drop, timeout, 5xx, overloaded, unreadable answer | Retried with backoff (15 s → 5 min), up to 8 times, then stops; **Resume** continues at the same page |
-| Invalid key, no billing credit, region, or no usable model | Stops with a message saying what to fix |
+| Invalid key (in any provider's error format), no billing credit, region, or no usable model | Stops with a message saying what to fix |
 
 **Pause** closes the open connection at once, even mid-answer.
 
@@ -291,7 +318,9 @@ app/
         │   └── LiveStatus.kt           Live page and streaming text for the screen
         ├── data/
         │   ├── TranslationRepository.kt  Pacing, retries, page Flow (provider-independent)
-        │   ├── ai/                       AITranslator strategies: Gemini, OpenAI, Groq, Anthropic;
+        │   ├── ai/                       AITranslator strategies: Gemini, OpenAI, Groq, Anthropic, and
+        │   │                             (MoreProviders.kt) Sarvam, OpenRouter, Cerebras, Mistral,
+        │   │                             DeepSeek, xAI, Cohere, Custom;
         │   │                             AIProvider (key pages, models), FallbackTranslator
         │   ├── llm/HinglishPrompt.kt     The Hindi system prompt + answer parser
         │   ├── settings/                 Provider + keys, output format, Terms of Use acceptance
@@ -310,9 +339,11 @@ app/
 - **Not yet run on a phone.** The build, lint, the unit tests (providers'
   requests and errors against a local server, fallback, prompt, parser,
   chunking, pagination, EPUB output validated with EPUBCheck, Room resume) and
-  live requests to all four providers' real endpoints (each correctly
-  rejected a dummy key) pass. A real translation with a valid key, the in-app
-  browser and the PDF rendering still need to be tried on a device.
+  live requests to the real endpoints of all eleven built-in providers
+  (each correctly rejected a dummy key) pass. A real translation with a
+  valid key, the in-app browser and the PDF rendering still need to be tried
+  on a device. The default model names were taken from each provider's
+  documentation in October 2026; when one is retired, the next is used.
 - **Google sign-in in the in-app browser** may be refused by Google; use the
   open-in-browser button then (see Setup).
 - **Model names change.** If every default model of a provider is retired,

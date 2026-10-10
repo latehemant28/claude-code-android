@@ -368,6 +368,124 @@ class ProviderTranslatorsTest {
 
     // ------------------------------------------------------------ network
 
+    private fun sarvam() = SarvamTranslator("sk_test_123", "sarvam-test", endpoint = "$base/v1/chat/completions")
+
+    @Test
+    fun `sarvam request and streamed answer`() {
+        replies = {
+            Reply(
+                200,
+                sse(
+                    """{"choices":[{"delta":{"reasoning_content":"thinking..."}}]}""",
+                    """{"choices":[{"delta":{"content":"नमस्ते "}}]}""",
+                    """{"choices":[{"delta":{"content":"दुनिया"},"finish_reason":"stop"}]}""",
+                    """{"choices":[],"usage":{"total_tokens":9}}""",
+                    "[DONE]",
+                ),
+            )
+        }
+        assertEquals("नमस्ते दुनिया", answer(sarvam())) // the reasoning trace is never part of the answer
+        val request = requests.single()
+        assertEquals("/v1/chat/completions", request.path)
+        assertEquals("sk_test_123", request.headers["api-subscription-key"])
+        assertEquals("Bearer sk_test_123", request.headers["authorization"])
+        assertEquals("sarvam-test", request.body["model"].asString)
+        assertEquals(HinglishPrompt.SYSTEM_PROMPT, request.body["messages"].asJsonArray[0].asJsonObject["content"].asString)
+        assertTrue(request.body["stream"].asBoolean)
+        assertTrue("reasoning switched off", request.body.has("reasoning_effort") && request.body["reasoning_effort"].isJsonNull)
+        assertEquals(8_192, request.body["max_tokens"].asInt)
+    }
+
+    @Test
+    fun `sarvam errors are sorted into what to do`() {
+        // Sarvam's real answer to a wrong key (403, not 401).
+        replies = error(403, """{"error":{"message":"Invalid or missing authentication credentials","code":"invalid_api_key_error","request_id":"20261010_x"}}""")
+        val badKey = failure(sarvam())
+        assertTrue(badKey is TranslatorException.Fatal && badKey.message!!.contains("rejected the API key"))
+
+        replies = error(429, """{"error":{"message":"Quota exceeded","code":"insufficient_quota_error"}}""")
+        val noCredit = failure(sarvam())
+        assertTrue(noCredit is TranslatorException.Fatal && noCredit.message!!.contains("no credit"))
+
+        replies = error(429, """{"error":{"message":"Too many requests","code":"rate_limit_exceeded_error"}}""", mapOf("Retry-After" to "7"))
+        val limited = failure(sarvam())
+        assertTrue(limited is TranslatorException.Transient && limited.rateLimited)
+        assertEquals(7_500L, (limited as TranslatorException.Transient).retryAfterMillis)
+
+        replies = error(404, """{"error":{"message":"Model not found","code":"not_found_error"}}""")
+        assertTrue(failure(sarvam()) is TranslatorException.ModelUnavailable)
+    }
+
+    @Test
+    fun `each openai-compatible provider calls its own address`() {
+        replies = { Reply(200, sse("""{"choices":[{"delta":{"content":"ठीक"}}]}""", "[DONE]")) }
+        val providers = listOf(
+            DeepSeekTranslator("k", "m", endpoint = "$base/deepseek/chat/completions") to "/deepseek/chat/completions",
+            MistralTranslator("k", "m", endpoint = "$base/mistral/v1/chat/completions") to "/mistral/v1/chat/completions",
+            XAITranslator("k", "m", endpoint = "$base/xai/v1/chat/completions") to "/xai/v1/chat/completions",
+            CohereTranslator("k", "m", endpoint = "$base/compatibility/v1/chat/completions") to "/compatibility/v1/chat/completions",
+            CerebrasTranslator("k", "m", endpoint = "$base/cerebras/v1/chat/completions") to "/cerebras/v1/chat/completions",
+            OpenRouterTranslator("k", "m", endpoint = "$base/api/v1/chat/completions") to "/api/v1/chat/completions",
+        )
+        for ((translator, path) in providers) {
+            requests.clear()
+            assertEquals("ठीक", answer(translator))
+            assertEquals(path, requests.single().path)
+            assertEquals("Bearer k", requests.single().headers["authorization"])
+        }
+        assertEquals("Hindi Book Translator", requests.single().headers["x-openrouter-title"])
+    }
+
+    @Test
+    fun `wrong keys are recognised in every provider's own error shape`() {
+        // The answers each service really sends to a wrong key.
+        val wrongKey = listOf(
+            MistralTranslator("k", "m", endpoint = "$base/v1/chat/completions") to error(401, """{"detail":"Invalid API Key"}"""),
+            XAITranslator("k", "m", endpoint = "$base/v1/chat/completions") to
+                error(400, """{"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}"""),
+            CohereTranslator("k", "m", endpoint = "$base/v1/chat/completions") to
+                error(401, """{"id":"x","message":"Incorrect API key provided: *****. You can find your API key at https://dashboard.cohere.com/api-keys."}"""),
+            CerebrasTranslator("k", "m", endpoint = "$base/v1/chat/completions") to
+                error(401, """{"message":"Wrong API Key","type":"invalid_request_error","param":"api_key","code":"wrong_api_key"}"""),
+            DeepSeekTranslator("k", "m", endpoint = "$base/v1/chat/completions") to
+                error(401, """{"error":{"message":"Authentication Fails, Your api key: ****ummy is invalid","type":"authentication_error","code":"invalid_request_error"}}"""),
+            OpenRouterTranslator("k", "m", endpoint = "$base/v1/chat/completions") to error(401, """{"error":{"message":"Missing Authentication header","code":401}}"""),
+        )
+        for ((translator, reply) in wrongKey) {
+            replies = reply
+            val e = failure(translator)
+            assertTrue("$translator: $e", e is TranslatorException.Fatal && e.message!!.contains("rejected the API key"))
+        }
+    }
+
+    @Test
+    fun `openrouter and deepseek limits and balance`() {
+        val openRouter = OpenRouterTranslator("k", "google/gemma-test:free", endpoint = "$base/v1/chat/completions")
+        replies = error(429, """{"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}""")
+        assertTrue(failure(openRouter) is TranslatorException.DailyQuota)
+
+        replies = error(429, """{"error":{"message":"Rate limit exceeded: free-models-per-min.","code":429}}""")
+        val perMinute = failure(openRouter)
+        assertTrue(perMinute is TranslatorException.Transient && perMinute.rateLimited)
+
+        replies = error(404, """{"error":{"message":"No endpoints found for google/gemma-test:free.","code":404}}""")
+        assertTrue(failure(openRouter) is TranslatorException.ModelUnavailable)
+
+        replies = error(402, """{"error":{"message":"Insufficient Balance","type":"unknown_error","code":"invalid_request_error"}}""")
+        val broke = failure(DeepSeekTranslator("k", "m", endpoint = "$base/v1/chat/completions"))
+        assertTrue(broke is TranslatorException.Fatal && broke.message!!.contains("no credit"))
+    }
+
+    @Test
+    fun `the custom provider's address is completed and must be https`() {
+        assertEquals("https://example.com/v1/chat/completions", CustomTranslator.chatCompletionsUrl(" https://example.com/v1/ "))
+        assertEquals("https://example.com/v1/chat/completions", CustomTranslator.chatCompletionsUrl("https://example.com/v1/chat/completions"))
+        assertNull(CustomTranslator.chatCompletionsUrl("http://192.168.1.5:11434/v1")) // never unencrypted
+        assertNull(CustomTranslator.chatCompletionsUrl("example.com/v1"))
+        assertNull(CustomTranslator.chatCompletionsUrl("https://"))
+        assertNull(CustomTranslator.chatCompletionsUrl(""))
+    }
+
     @Test
     fun `no connection is retried later`() {
         val port = server.localPort
