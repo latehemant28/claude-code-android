@@ -20,26 +20,27 @@ class HinglishPromptTest {
         unit(BlockKind.NUMBERED, "Save the file", marker = "3."),
     )
 
-    /** The system prompt exactly as specified, with the chunk in place of the placeholder. */
-    private val specified = """You are a highly accurate English to Hinglish translator. You only translate the text inside the <input> tags. Do not repeat the examples. 
+    /** The system prompt exactly as specified. */
+    private val specified = """You are a literary translator who converts English text into natural Hinglish (Hindi written in Roman script, mixed with common English words), the way an educated Indian would narrate a story aloud.
 
-<rules>
-1. Translate to natural, modern Hinglish (Hindi in Roman script).
-2. Keep it casual like a WhatsApp chat between modern urban Indians.
-3. Keep English words for technical terms, concepts, verbs, or common objects (e.g., 'discussion', 'trauma', 'system').
-4. Never use pure Hindi/Devanagari words like 'samavesh' or 'vyatirikta'.
-5. Output ONLY the final translation. Do not add any extra text or repeat the prompt.
-</rules>
+RULES:
+1. Do NOT translate word by word. Read the full sentence, understand its meaning, then retell it naturally in Hinglish.
+2. Keep the original tense and narrative voice. If the source is in past tense, use tha/thi/the throughout. Never switch to present tense.
+3. Language mix:
+   - Keep English only for words people commonly use in daily Hinglish (for example: philosopher, simple, happiness, city, life).
+   - Use simple, natural Hindi for everything else. Avoid heavy or bookish Hindi.
+   - Do not leave literary or abstract words in English if a natural Hindi word exists (for example, use "uljha hua" instead of "chaotic", "bekaar" instead of "absurd").
+4. Idioms: never translate idioms literally. Use the natural Hindi equivalent.
+   Example: "heart of the matter" becomes "asli baat", and "anxious eyes" becomes "ghabrayi hui aankhen".
+5. Keep the literary tone and rhythm of the original. Use short, flowing sentences. Do not make it sound like casual chat or a text message.
+6. Do not add, remove or explain anything. Keep all the meaning and details of the original.
+7. Use Roman script only. No Devanagari.
+8. Output only the translation, with no notes, headings or commentary.
 
-<examples>
-English: Let's catch up later to finalize the project details.
-Hinglish: Baad mein catch up karte hain taaki project details finalize kar sakein.
-</examples>
-
-Translate the following text:
-<input>
-[INSERT TEXT CHUNK HERE]
-</input>"""
+STYLE EXAMPLE:
+English: "A young man who was dissatisfied with life went to visit this philosopher."
+Good Hinglish: "Zindagi se naakhush ek naujawan us philosopher se milne gaya."
+Bad Hinglish: "Life se dissatisfied ek young man is philosopher ko visit karne gaya.""""
 
     @Test
     fun `system prompt is embedded exactly`() {
@@ -47,9 +48,9 @@ Translate the following text:
     }
 
     @Test
-    fun `chunk goes in as markdown with the original structure`() {
+    fun `the request is just the chunk, as markdown with the original structure`() {
         val chunk = "## Getting started\n\nFirst, we need to plan.\n\n- Open the app\n\n  - Tap settings\n\n3. Save the file"
-        assertEquals(specified.replace("[INSERT TEXT CHUNK HERE]", chunk), HinglishPrompt.build(units))
+        assertEquals(chunk, HinglishPrompt.build(units))
     }
 
     @Test
@@ -76,6 +77,17 @@ Translate the following text:
             listOf("Shuru karte hain", "Pehle, hume plan karna hoga.", "App open karo", "Settings pe tap karo", "File save kar do"),
             HinglishPrompt.parse(raw, units),
         )
+    }
+
+    @Test
+    fun `a style-example label and wrapping quotes are removed, real quotations kept`() {
+        val one = listOf(unit(BlockKind.PARAGRAPH, "A young man went to visit the philosopher."))
+        assertEquals(
+            listOf("Ek naujawan philosopher se milne gaya."),
+            HinglishPrompt.parse("Good Hinglish: \"Ek naujawan philosopher se milne gaya.\"", one),
+        )
+        val quoted = listOf(unit(BlockKind.PARAGRAPH, "\"Wait,\" she said."))
+        assertEquals(listOf("\"Ruko,\" usne kaha."), HinglishPrompt.parse("\"Ruko,\" usne kaha.", quoted))
     }
 
     @Test

@@ -32,9 +32,9 @@ class TranslationRepositoryTest {
         HinglishModel {
         val prompts = mutableListOf<String>()
 
-        override fun translate(prompt: String): Flow<String> = flow {
-            prompts += prompt
-            val blocks = prompt.substringAfter("<input>\n").substringBefore("\n</input>").split("\n\n")
+        override fun translate(chunk: String): Flow<String> = flow {
+            prompts += chunk
+            val blocks = chunk.split("\n\n")
             val out = blocks.map { block ->
                 val marker = Regex("^(#+ |\\s*- |\\s*\\d+\\. )?").find(block)!!.value
                 marker to "HI(${block.removePrefix(marker)})"
@@ -51,7 +51,7 @@ class TranslationRepositoryTest {
                 }
                 Fault.NONE -> Unit
             }
-            emit("Hinglish: ") // the prompt's example invites this label
+            emit("Good Hinglish: ") // the prompt's style example invites this label
             for ((marker, text) in out) {
                 emit(marker)
                 emit(text) // streamed in pieces
@@ -87,7 +87,8 @@ class TranslationRepositoryTest {
         val events = repository(gemini).translatePage(page).toList()
 
         assertEquals(1, gemini.prompts.size)
-        assertTrue(gemini.prompts[0].contains("<input>\n# Chapter 4\n\nIt was a cold morning.\n\nEveryone was late.\n\n- Bring a coat\n\n2. Leave early\n</input>"))
+        // The request is just the chunk; the instructions are the system prompt.
+        assertEquals("# Chapter 4\n\nIt was a cold morning.\n\nEveryone was late.\n\n- Bring a coat\n\n2. Leave early", gemini.prompts[0])
         assertEquals(PageEvent.ChunkStarted(1, 1), events.first())
         assertTrue(events.count { it is PageEvent.Token } > 5)
         assertEquals(PageEvent.PageFinished(expected), events.last())

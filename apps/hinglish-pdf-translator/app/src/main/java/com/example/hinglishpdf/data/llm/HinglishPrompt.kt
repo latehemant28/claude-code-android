@@ -4,42 +4,42 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.translate.TranslationUnit
 
 /**
- * The prompt sent with every chunk, and the parser that maps Gemini's answer
- * back onto the chunk's headings, bullets and paragraphs.
+ * The translation prompt and the parser that maps Gemini's answer back onto
+ * the chunk's headings, bullets and paragraphs.
  *
- * The prompt is embedded exactly as specified; the chunk replaces
- * [CHUNK_PLACEHOLDER] inside the <input> tags. The chunk itself is written as
+ * [SYSTEM_PROMPT] is embedded exactly as specified and set once as the
+ * model's system instruction. Each request then carries only the chunk, as
  * plain Markdown, one block per paragraph (`## Heading`, `- bullet`,
  * `2. step`), so the answer can be matched back block by block.
  */
 object HinglishPrompt {
 
-    const val CHUNK_PLACEHOLDER = "[INSERT TEXT CHUNK HERE]"
-
     /** Embedded exactly as specified (line breaks and spacing included). */
-    const val SYSTEM_PROMPT =
-        "You are a highly accurate English to Hinglish translator. You only translate the text inside the <input> tags. Do not repeat the examples. \n" +
-            "\n" +
-            "<rules>\n" +
-            "1. Translate to natural, modern Hinglish (Hindi in Roman script).\n" +
-            "2. Keep it casual like a WhatsApp chat between modern urban Indians.\n" +
-            "3. Keep English words for technical terms, concepts, verbs, or common objects (e.g., 'discussion', 'trauma', 'system').\n" +
-            "4. Never use pure Hindi/Devanagari words like 'samavesh' or 'vyatirikta'.\n" +
-            "5. Output ONLY the final translation. Do not add any extra text or repeat the prompt.\n" +
-            "</rules>\n" +
-            "\n" +
-            "<examples>\n" +
-            "English: Let's catch up later to finalize the project details.\n" +
-            "Hinglish: Baad mein catch up karte hain taaki project details finalize kar sakein.\n" +
-            "</examples>\n" +
-            "\n" +
-            "Translate the following text:\n" +
-            "<input>\n" +
-            CHUNK_PLACEHOLDER + "\n" +
-            "</input>"
+    val SYSTEM_PROMPT = """
+        You are a literary translator who converts English text into natural Hinglish (Hindi written in Roman script, mixed with common English words), the way an educated Indian would narrate a story aloud.
 
-    fun build(units: List<TranslationUnit>): String =
-        SYSTEM_PROMPT.replace(CHUNK_PLACEHOLDER, chunkText(units))
+        RULES:
+        1. Do NOT translate word by word. Read the full sentence, understand its meaning, then retell it naturally in Hinglish.
+        2. Keep the original tense and narrative voice. If the source is in past tense, use tha/thi/the throughout. Never switch to present tense.
+        3. Language mix:
+           - Keep English only for words people commonly use in daily Hinglish (for example: philosopher, simple, happiness, city, life).
+           - Use simple, natural Hindi for everything else. Avoid heavy or bookish Hindi.
+           - Do not leave literary or abstract words in English if a natural Hindi word exists (for example, use "uljha hua" instead of "chaotic", "bekaar" instead of "absurd").
+        4. Idioms: never translate idioms literally. Use the natural Hindi equivalent.
+           Example: "heart of the matter" becomes "asli baat", and "anxious eyes" becomes "ghabrayi hui aankhen".
+        5. Keep the literary tone and rhythm of the original. Use short, flowing sentences. Do not make it sound like casual chat or a text message.
+        6. Do not add, remove or explain anything. Keep all the meaning and details of the original.
+        7. Use Roman script only. No Devanagari.
+        8. Output only the translation, with no notes, headings or commentary.
+
+        STYLE EXAMPLE:
+        English: "A young man who was dissatisfied with life went to visit this philosopher."
+        Good Hinglish: "Zindagi se naakhush ek naujawan us philosopher se milne gaya."
+        Bad Hinglish: "Life se dissatisfied ek young man is philosopher ko visit karne gaya."
+    """.trimIndent()
+
+    /** The user message for one chunk: the chunk itself (the instructions are in [SYSTEM_PROMPT]). */
+    fun build(units: List<TranslationUnit>): String = chunkText(units)
 
     /** The chunk as Markdown: one block per paragraph, original markers kept. */
     fun chunkText(units: List<TranslationUnit>): String =
@@ -77,8 +77,8 @@ object HinglishPrompt {
 
     /**
      * Removes what the model sometimes wraps around the translation: a code
-     * fence, echoed <input>/<output> tags, a "Here is..." line, or a leading
-     * "Hinglish:" label (the prompt's example uses one).
+     * fence, echoed tags, a "Here is..." line, or a leading "Hinglish:" /
+     * "Good Hinglish:" label (the prompt's style example uses one).
      */
     private fun stripFiller(raw: String): String {
         var text = raw.replace("\r\n", "\n").trim()
@@ -124,16 +124,29 @@ object HinglishPrompt {
                 BlockKind.PARAGRAPH, BlockKind.CODE -> t
             }
         }
-        return t.removeSurrounding("**").trim()
+        return unquote(t.removeSurrounding("**").trim(), unit)
     }
 
+    /**
+     * The style example puts its sentences in quotes, so Gemini sometimes
+     * wraps a whole answer in them. Remove those quotes unless the original
+     * text was itself a quotation.
+     */
+    private fun unquote(text: String, unit: TranslationUnit): String {
+        if (text.length < 2 || text.first() !in OPEN_QUOTES || text.last() !in CLOSE_QUOTES) return text
+        if (unit.text.trimStart().firstOrNull() in OPEN_QUOTES) return text
+        return text.substring(1, text.length - 1).trim()
+    }
+
+    private val OPEN_QUOTES = setOf('"', '“')
+    private val CLOSE_QUOTES = setOf('"', '”')
     private val NEWLINES = Regex("\\s*\\n\\s*")
     private val BLANK_LINE = Regex("\\n[ \\t]*\\n")
     private val STARTS_BLOCK = Regex("^(#{1,6}\\s|[-*•]\\s|\\(?\\d{1,3}[.)]\\s|>\\s?)")
     private val CODE_FENCE = Regex("^```[a-zA-Z]*\\s*$", RegexOption.MULTILINE)
     private val XML_TAG = Regex("</?(input|output|translation)>", RegexOption.IGNORE_CASE)
     private val PREAMBLE = Regex("^(here is|here's|sure)[^\\n]*:\\s*\\n", RegexOption.IGNORE_CASE)
-    private val LABEL = Regex("^(hinglish|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
+    private val LABEL = Regex("^((good )?hinglish|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
     private val HEADING_MARK = Regex("^#{1,6}\\s*")
     private val BULLET_MARK = Regex("^[-*•●◦▪]\\s+")
     private val NUMBER_MARK = Regex("^\\(?\\d{1,3}[.)]\\s+")

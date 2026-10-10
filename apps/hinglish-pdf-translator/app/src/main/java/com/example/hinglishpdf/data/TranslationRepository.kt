@@ -17,6 +17,7 @@ import com.google.ai.client.generativeai.type.ResponseStoppedException
 import com.google.ai.client.generativeai.type.SafetySetting
 import com.google.ai.client.generativeai.type.ServerException
 import com.google.ai.client.generativeai.type.UnsupportedUserLocationException
+import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -75,8 +76,8 @@ sealed class GeminiException(message: String, cause: Throwable? = null) : Except
 
 /** The model behind an interface, so the pipeline can be tested without the network. */
 fun interface HinglishModel {
-    /** Streams the answer to [prompt]; failures are thrown as [GeminiException]. */
-    fun translate(prompt: String): Flow<String>
+    /** Streams the translation of [chunk]; failures are thrown as [GeminiException]. */
+    fun translate(chunk: String): Flow<String>
 }
 
 /**
@@ -98,10 +99,13 @@ class GeminiHinglishModel(private val modelName: String = GEMINI_MODEL_NAME) : H
             HarmCategory.DANGEROUS_CONTENT,
         ).map { SafetySetting(it, BlockThreshold.NONE) },
         requestOptions = RequestOptions(timeout = REQUEST_TIMEOUT_MS),
+        // The literary-translator instructions, verbatim; each request then
+        // carries only the chunk of text to translate.
+        systemInstruction = content { text(HinglishPrompt.SYSTEM_PROMPT) },
     )
 
-    override fun translate(prompt: String): Flow<String> =
-        model.generateContentStream(prompt)
+    override fun translate(chunk: String): Flow<String> =
+        model.generateContentStream(chunk)
             .map { it.text.orEmpty() }
             .catch { throw classify(it, modelName) }
 
@@ -186,7 +190,8 @@ class RequestPacer(
 
 /**
  * Translates ONE page with Gemini: cuts it into chunks of whole blocks (a
- * normal page is a single request), sends each with the Hinglish prompt,
+ * normal page is a single request), sends each to Gemini (whose system
+ * instruction is the literary-translator prompt),
  * streams the answer, and maps it back onto the page's headings, bullets,
  * numbering and paragraphs.
  *

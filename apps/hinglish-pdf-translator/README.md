@@ -81,7 +81,7 @@ Select PDF/EPUB ─► BookImporter.copyIn ─► Room: book (QUEUED) ─► Tra
   2. loop: page = first page with translations IS NULL              │
         TranslationRepository.translatePage(page):                  │
           BlockChunker: page → chunk(s) of whole blocks (≤800 words)│
-          prompt = system prompt with the chunk in <input>:         │
+          request = the chunk (system instruction = the prompt):     │
               # Chapter 4                                           │
               It was a cold morning.                                │
               - Bring a coat                                        │
@@ -95,20 +95,25 @@ Select PDF/EPUB ─► BookImporter.copyIn ─► Room: book (QUEUED) ─► Tra
 ### The prompt
 
 [`HinglishPrompt.SYSTEM_PROMPT`](app/src/main/java/com/example/hinglishpdf/data/llm/HinglishPrompt.kt)
-is the specified prompt, character for character (a unit test checks it). Each
-chunk replaces `[INSERT TEXT CHUNK HERE]` inside the `<input>` tags. The model
-is set up with temperature 0.2, and safety filters set to `NONE` so ordinary
-literature (violence, romance, medicine) isn't refused mid-book.
+is the literary-translator prompt, character for character (a unit test checks
+it): natural Hinglish the way an educated Indian would narrate a story, the
+original tense kept, idioms rendered naturally, and nothing added or removed.
+It is set once as Gemini's **system instruction**; each request then carries
+only the chunk of text. The model runs at temperature 0.2, with safety filters
+set to `NONE` so ordinary literature (violence, romance, medicine) isn't
+refused mid-book.
 
-Because the prompt carries the chunk inside it, it is sent as the request
-itself rather than as a separate system instruction, so Gemini receives exactly
-that text.
+Rule 8 ("no notes, headings or commentary") is about not *adding* anything,
+but a model may take it as "drop headings". If Gemini leaves out a book's own
+heading, the block count no longer matches and that part is re-translated in
+smaller pieces (below), so headings are kept.
 
 ### Getting the structure back
 
 The chunk is written as Markdown, one block per paragraph. Gemini's answer is
-split the same way; code fences, echoed `<input>` tags and a leading
-"Hinglish:" label are removed first.
+split the same way; code fences, a leading "Hinglish:" / "Good Hinglish:"
+label and quotes wrapped around the whole answer (the prompt's style example
+uses both) are removed first.
 
 - **Block count matches:** block *i* is the translation of block *i*, and the
   app re-applies the original marker. A bullet stays a bullet even if Gemini
@@ -178,7 +183,7 @@ app/
         │   └── LiveStatus.kt           Live page and streaming text for the screen
         ├── data/
         │   ├── TranslationRepository.kt  Gemini client, pacing, retries, page translation Flow
-        │   ├── llm/HinglishPrompt.kt     The system prompt (verbatim) + answer parser
+        │   ├── llm/HinglishPrompt.kt     The system instruction (verbatim) + answer parser
         │   ├── db/                       Room: books, pages (PK = bookId + pageNumber), DAOs
         │   ├── pdf/                      PDFBox extraction + layout analysis per page
         │   ├── epub/EpubBook.kt          EPUB reading and translated copy
