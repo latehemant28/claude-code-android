@@ -44,7 +44,7 @@ class TranslationRepositoryTest {
                 Fault.DAILY_QUOTA -> throw GeminiException.DailyQuota()
                 Fault.BLOCKED -> throw GeminiException.Blocked("SAFETY")
                 Fault.BAD_KEY -> throw GeminiException.Fatal("Gemini rejected the API key.")
-                Fault.DEVANAGARI_IN_LAST -> out[out.lastIndex] = out.last().first to "नमस्ते"
+                Fault.DEVANAGARI_IN_LAST -> out[out.lastIndex] = out.last().first to "जल्दी निकलना"
                 Fault.MERGES_PARAGRAPHS -> {
                     out[1] = "" to out[1].second + " " + out[2].second
                     out.removeAt(2)
@@ -103,11 +103,11 @@ class TranslationRepositoryTest {
     }
 
     @Test
-    fun `a block in devanagari is retried on its own`() = runTest {
-        val gemini = FakeGemini { request, _ -> if (request == 1) Fault.DEVANAGARI_IN_LAST else Fault.NONE }
+    fun `devanagari output is the expected result, not retried`() = runTest {
+        val gemini = FakeGemini { _, _ -> Fault.DEVANAGARI_IN_LAST }
         val events = repository(gemini).translatePage(page).toList()
-        assertEquals(2, gemini.prompts.size)
-        assertEquals(PageEvent.PageFinished(expected), events.last())
+        assertEquals(1, gemini.prompts.size)
+        assertEquals(PageEvent.PageFinished(expected.dropLast(2) + "जल्दी निकलना" + null), events.last())
     }
 
     @Test
@@ -146,12 +146,14 @@ class TranslationRepositoryTest {
         val classify = { e: Throwable -> GeminiHinglishModel.classify(e, "gemini-x") }
 
         val perMinute = classify(QuotaExceededException("Quota exceeded for metric ... Please retry in 23.4s.", null))
-        assertTrue(perMinute is GeminiException.Transient)
+        assertTrue(perMinute is GeminiException.Transient && perMinute.rateLimited)
         assertEquals(24_400L, (perMinute as GeminiException.Transient).retryAfterMillis)
 
         assertTrue(classify(QuotaExceededException("quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier", null)) is GeminiException.DailyQuota)
         assertTrue(classify(InvalidAPIKeyException("API key not valid", null)) is GeminiException.Fatal)
-        assertTrue(classify(ServerException("models/gemini-x is not found for API version v1beta", null)) is GeminiException.Fatal)
+        val retired = classify(ServerException("models/gemini-x is not found for API version v1beta", null))
+        assertTrue(retired is GeminiException.ModelUnavailable) // the fallback moves on to the next model
+        assertTrue((classify(ServerException("429 RESOURCE_EXHAUSTED", null)) as GeminiException.Transient).rateLimited)
         assertTrue(classify(ServerException("503 The model is overloaded", null)) is GeminiException.Transient)
         assertTrue(classify(RuntimeException("wrapped", UnknownHostException("generativelanguage.googleapis.com"))) is GeminiException.Transient)
         assertTrue(classify(IOException("connection reset")) is GeminiException.Transient)

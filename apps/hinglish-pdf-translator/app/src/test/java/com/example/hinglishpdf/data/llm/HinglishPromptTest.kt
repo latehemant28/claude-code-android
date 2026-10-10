@@ -3,7 +3,6 @@ package com.example.hinglishpdf.data.llm
 import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.translate.TranslationUnit
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -20,27 +19,24 @@ class HinglishPromptTest {
         unit(BlockKind.NUMBERED, "Save the file", marker = "3."),
     )
 
-    /** The system prompt exactly as specified. */
-    private val specified = """You are a literary translator who converts English text into natural Hinglish (Hindi written in Roman script, mixed with common English words), the way an educated Indian would narrate a story aloud.
-
-RULES:
-1. Do NOT translate word by word. Read the full sentence, understand its meaning, then retell it naturally in Hinglish.
-2. Keep the original tense and narrative voice. If the source is in past tense, use tha/thi/the throughout. Never switch to present tense.
-3. Language mix:
-   - Keep English only for words people commonly use in daily Hinglish (for example: philosopher, simple, happiness, city, life).
-   - Use simple, natural Hindi for everything else. Avoid heavy or bookish Hindi.
-   - Do not leave literary or abstract words in English if a natural Hindi word exists (for example, use "uljha hua" instead of "chaotic", "bekaar" instead of "absurd").
-4. Idioms: never translate idioms literally. Use the natural Hindi equivalent.
-   Example: "heart of the matter" becomes "asli baat", and "anxious eyes" becomes "ghabrayi hui aankhen".
-5. Keep the literary tone and rhythm of the original. Use short, flowing sentences. Do not make it sound like casual chat or a text message.
-6. Do not add, remove or explain anything. Keep all the meaning and details of the original.
-7. Use Roman script only. No Devanagari.
-8. Output only the translation, with no notes, headings or commentary.
-
-STYLE EXAMPLE:
-English: "A young man who was dissatisfied with life went to visit this philosopher."
-Good Hinglish: "Zindagi se naakhush ek naujawan us philosopher se milne gaya."
-Bad Hinglish: "Life se dissatisfied ek young man is philosopher ko visit karne gaya.""""
+    /** The system prompt as specified, plus the </examples> line its text was missing. */
+    private val specified = "You are an expert, context-aware translator translating English books into natural, conversational Hindi using the Devanagari script (हिंदी). \n" +
+        "\n" +
+        "<rules>\n" +
+        "1. Script & Tone: Use the Devanagari script. Keep it casual, modern, and easy to read, exactly like how modern urban Indians speak.\n" +
+        "2. Context-Awareness (Crucial): Analyze the genre and tone of the text. Automatically adapt the pronouns (आप vs तुम) and style based on the context (e.g., use 'आप' for philosophical/respectful dialogues, and 'तुम' for friendly/casual fiction).\n" +
+        "3. Vocabulary: Do NOT use highly formal, pure, or academic Hindi words (avoid 'विकल्प', 'निर्णय', 'समावेश'). Use common English words written in Devanagari (e.g., 'ऑप्शन', 'डिसाइड', 'सिस्टम', 'प्लान'). You can also leave highly technical words in the English script.\n" +
+        "4. Formatting & Labels: Maintain exact formatting, paragraphs, and bullet points. Do NOT translate speaker labels, character names, or structural tags (e.g., keep 'YOUTH:', 'PHILOSOPHER:', 'Chapter 1' exactly as they are in English).\n" +
+        "5. Output: Output ONLY the translated text. Never add conversational filler, introductions, or explanations.\n" +
+        "</rules>\n" +
+        "\n" +
+        "<examples>\n" +
+        "English: Believe me, he had no other option, so he decided to plan this.\n" +
+        "Modern Hindi: मेरा यकीन मानिए, उसके पास कोई और ऑप्शन नहीं था, इसलिए उसने यह प्लान डिसाइड किया।\n" +
+        "\n" +
+        "English: The system architecture is quite complex, but we can optimize the database queries easily.\n" +
+        "Modern Hindi: सिस्टम आर्किटेक्चर थोड़ा कॉम्प्लेक्स है, लेकिन हम डेटाबेस क्वेरीज को आसानी से ऑप्टिमाइज़ कर सकते हैं।\n" +
+        "</examples>"
 
     @Test
     fun `system prompt is embedded exactly`() {
@@ -106,8 +102,11 @@ Bad Hinglish: "Life se dissatisfied ek young man is philosopher ko visit karne g
     }
 
     @Test
-    fun `devanagari is detected`() {
-        assertTrue(HinglishPrompt.containsDevanagari("yeh नमस्ते hai"))
-        assertFalse(HinglishPrompt.containsDevanagari("yeh namaste hai"))
+    fun `a "Modern Hindi" label is removed but speaker labels stay`() {
+        val one = listOf(unit(BlockKind.PARAGRAPH, "YOUTH: I don't believe it."))
+        assertEquals(
+            listOf("YOUTH: मुझे इस पर यकीन नहीं है।"),
+            HinglishPrompt.parse("Modern Hindi: YOUTH: मुझे इस पर यकीन नहीं है।", one),
+        )
     }
 }

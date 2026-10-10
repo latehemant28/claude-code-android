@@ -28,7 +28,7 @@ class BookExporter(private val context: Context, private val db: AppDatabase) {
 
     suspend fun exportToDownloads(book: BookEntity): Saved = withContext(Dispatchers.IO) {
         val pages = db.pageDao().pages(book.id)
-        val name = "${book.title} (Hinglish).${book.format.extension}"
+        val name = "${book.title} (Hindi).${book.format.extension}"
         val uri = saveToDownloads(name, book.format.mimeType) { out ->
             when (book.format) {
                 DocFormat.PDF -> PdfExporter.write(out, pages)

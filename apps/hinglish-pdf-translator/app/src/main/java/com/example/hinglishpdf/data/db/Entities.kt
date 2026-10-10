@@ -30,9 +30,9 @@ data class BookEntity(
     /** Private copy of the picked file (the original URI may not stay readable). */
     val sourcePath: String,
     /**
-     * Output language label. Always "Hinglish" now; kept as a plain string so
-     * databases written by earlier versions (which also had "Minglish") still
-     * open without a migration.
+     * Output language label (unused by the app now, which always translates to
+     * Hindi). Kept as a plain string so databases written by earlier versions
+     * still open without a migration.
      */
     val language: String = "Hinglish",
     val pageCount: Int = 0,

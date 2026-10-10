@@ -57,6 +57,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
+import com.example.hinglishpdf.ui.reader.LocalReaderStyle
+import com.example.hinglishpdf.ui.reader.ReaderSettingsSheet
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +97,8 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pages by viewModel.pages.collectAsStateWithLifecycle()
     val livePage by viewModel.livePage.collectAsStateWithLifecycle()
+    val readerStyle by viewModel.readerStyle.collectAsStateWithLifecycle()
+    var showTextSettings by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -114,93 +121,114 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
         }
     }
 
-    Scaffold(
-        topBar = { CenterAlignedTopAppBar(title = { Text("Book → Hinglish") }) },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item(key = "gemini") {
-                GeminiCard(
-                    configured = state.geminiConfigured,
-                    source = state.geminiKeySource,
-                    modelName = state.geminiModel,
-                    busy = state.live.running,
-                    onSaveKey = viewModel::saveApiKey,
-                    onRemoveKey = viewModel::removeApiKey,
-                )
-            }
+    if (showTextSettings) {
+        ReaderSettingsSheet(
+            style = readerStyle,
+            onFont = viewModel::setReaderFont,
+            onTextSize = viewModel::setReaderTextSize,
+            onDismiss = { showTextSettings = false },
+        )
+    }
 
-            item(key = "new") {
-                NewBookCard(
-                    enabled = state.canAddBook,
-                    importing = state.importing,
-                    onPick = {
-                        // Some file managers label EPUBs as generic binaries.
-                        bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+    CompositionLocalProvider(LocalReaderStyle provides readerStyle) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("Book → Hindi") },
+                    actions = {
+                        // "Aa": font style and text size for the translated text.
+                        IconButton(onClick = { showTextSettings = true }) {
+                            Text("Aa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        }
                     },
                 )
-            }
-
-            if (state.books.isNotEmpty()) {
-                item(key = "library-title") {
-                    Text("Your books", style = MaterialTheme.typography.titleMedium)
-                }
-                items(state.books, key = { "book-${it.book.id}" }) { entry ->
-                    BookCard(
-                        entry = entry,
-                        selected = entry.book.id == state.selected?.book?.id,
-                        running = state.isRunning(entry.book),
-                        liveLabel = state.live.label.takeIf { state.isRunning(entry.book) },
-                        onSelect = { viewModel.select(entry.book.id) },
-                        onPause = viewModel::pause,
-                        onResume = { viewModel.resume(entry.book) },
-                        onSave = { viewModel.saveToDownloads(entry.book) },
-                        onOpen = {
-                            val uri = entry.book.outputUri ?: return@BookCard
-                            try {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW)
-                                        .setDataAndType(Uri.parse(uri), entry.book.format.mimeType)
-                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                )
-                            } catch (e: Exception) {
-                                viewModel.showMessage("No app found to open ${entry.book.outputName}")
-                            }
-                        },
-                        onCopy = {
-                            val message = try {
-                                clipboard.setText(AnnotatedString(viewModel.plainText()))
-                                "Copied the translated pages"
-                            } catch (e: RuntimeException) {
-                                "Too large for the clipboard; use Save instead"
-                            }
-                            viewModel.showMessage(message)
-                        },
-                        onDelete = { viewModel.delete(entry.book) },
+            },
+            snackbarHost = { SnackbarHost(snackbar) },
+        ) { padding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item(key = "gemini") {
+                    GeminiCard(
+                        configured = state.geminiConfigured,
+                        source = state.geminiKeySource,
+                        modelName = state.geminiModel,
+                        busy = state.live.running,
+                        onSaveKey = viewModel::saveApiKey,
+                        onRemoveKey = viewModel::removeApiKey,
                     )
                 }
-            }
 
-            val selected = state.selected
-            if (selected != null) {
-                val unit = selected.book.unitName.replaceFirstChar { it.uppercase() }
-                val live = livePage
-                if (state.isRunning(selected.book) && live != null) {
-                    item(key = "live") { LiveCard(state.live.label, live, unit) }
+                item(key = "new") {
+                    NewBookCard(
+                        enabled = state.canAddBook,
+                        importing = state.importing,
+                        onPick = {
+                            // Some file managers label EPUBs as generic binaries.
+                            bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+                        },
+                    )
                 }
-                if (pages.isNotEmpty()) {
-                    item(key = "preview-title") {
-                        Text("Preview: ${selected.book.title}", style = MaterialTheme.typography.titleMedium)
+
+                if (state.books.isNotEmpty()) {
+                    item(key = "library-title") {
+                        Text("Your books", style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(state.books, key = { "book-${it.book.id}" }) { entry ->
+                        BookCard(
+                            entry = entry,
+                            selected = entry.book.id == state.selected?.book?.id,
+                            running = state.isRunning(entry.book),
+                            liveLabel = state.live.label.takeIf { state.isRunning(entry.book) },
+                            onSelect = { viewModel.select(entry.book.id) },
+                            onPause = viewModel::pause,
+                            onResume = { viewModel.resume(entry.book) },
+                            onSave = { viewModel.saveToDownloads(entry.book) },
+                            onOpen = {
+                                val uri = entry.book.outputUri ?: return@BookCard
+                                try {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW)
+                                            .setDataAndType(Uri.parse(uri), entry.book.format.mimeType)
+                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                    )
+                                } catch (e: Exception) {
+                                    viewModel.showMessage("No app found to open ${entry.book.outputName}")
+                                }
+                            },
+                            onCopy = {
+                                val message = try {
+                                    clipboard.setText(AnnotatedString(viewModel.plainText()))
+                                    "Copied the translated pages"
+                                } catch (e: RuntimeException) {
+                                    "Too large for the clipboard; use Save instead"
+                                }
+                                viewModel.showMessage(message)
+                            },
+                            onDelete = { viewModel.delete(entry.book) },
+                        )
                     }
                 }
-                // Newest page first while translating, so progress is visible without scrolling.
-                val ordered = if (state.isRunning(selected.book)) pages.asReversed() else pages
-                items(ordered, key = { "page-${it.bookId}-${it.pageNumber}" }) { page ->
-                    PageView(page, unit)
+
+                val selected = state.selected
+                if (selected != null) {
+                    val unit = selected.book.unitName.replaceFirstChar { it.uppercase() }
+                    val live = livePage
+                    if (state.isRunning(selected.book) && live != null) {
+                        item(key = "live") { LiveCard(state.live.label, live, unit) }
+                    }
+                    if (pages.isNotEmpty()) {
+                        item(key = "preview-title") {
+                            Text("Preview: ${selected.book.title}", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    // Newest page first while translating, so progress is visible without scrolling.
+                    val ordered = if (state.isRunning(selected.book)) pages.asReversed() else pages
+                    items(ordered, key = { "page-${it.bookId}-${it.pageNumber}" }) { page ->
+                        PageView(page, unit)
+                    }
                 }
             }
         }
@@ -211,7 +239,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 private fun GeminiCard(
     configured: Boolean,
     source: GeminiKeyStore.Source,
-    modelName: String,
+    modelName: String?,
     busy: Boolean,
     onSaveKey: (String) -> Unit,
     onRemoveKey: () -> Unit,
@@ -221,7 +249,8 @@ private fun GeminiCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Cloud, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Google Gemini · $modelName", style = MaterialTheme.typography.titleSmall)
+                // The model is picked automatically from GEMINI_MODELS (fallback order).
+                Text("Google Gemini · ${modelName ?: "model picked automatically"}", style = MaterialTheme.typography.titleSmall)
             }
             if (configured) {
                 Text(
@@ -262,7 +291,7 @@ private fun NewBookCard(
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Translate a book into Hinglish", style = MaterialTheme.typography.titleSmall)
+            Text("Translate a book into Hindi", style = MaterialTheme.typography.titleSmall)
             Button(onClick = onPick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.UploadFile, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -386,9 +415,12 @@ private fun LiveCard(label: String, live: LivePage, unit: String) {
                 previous = block
             }
             if (live.streaming.isNotEmpty()) {
+                val reader = LocalReaderStyle.current
                 Text(
                     "${live.streaming}▍",
-                    style = MaterialTheme.typography.bodyLarge,
+                    fontFamily = reader.font.family,
+                    fontSize = reader.textSizeSp.sp,
+                    lineHeight = (reader.textSizeSp * 1.6f).sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -426,42 +458,49 @@ private fun PageView(page: PageEntity, unit: String) {
 
 @Composable
 private fun BlockView(block: DocBlock, text: String, previous: DocBlock?) {
-    val type = MaterialTheme.typography
+    // Translated text uses the reader's chosen Hindi font and size; headings scale with it.
+    val reader = LocalReaderStyle.current
+    val body = TextStyle(
+        fontFamily = reader.font.family,
+        fontSize = reader.textSizeSp.sp,
+        lineHeight = (reader.textSizeSp * 1.6f).sp, // Devanagari needs room for matras
+    )
     val isList = block.kind == BlockKind.BULLET || block.kind == BlockKind.NUMBERED
     val prevIsList = previous?.kind == BlockKind.BULLET || previous?.kind == BlockKind.NUMBERED
     val top = when {
         previous == null -> 0.dp
-        block.kind == BlockKind.HEADING -> 10.dp
+        block.kind == BlockKind.HEADING -> 12.dp
         isList && prevIsList -> 0.dp
-        else -> 4.dp
+        else -> 6.dp
     }
     Box(Modifier.padding(top = top)) {
         when (block.kind) {
-            BlockKind.HEADING -> Text(
-                text,
-                style = when (block.level) {
-                    1 -> type.headlineSmall
-                    2 -> type.titleLarge
-                    3 -> type.titleMedium
-                    else -> type.titleSmall
-                },
-                fontWeight = FontWeight.Bold,
-            )
+            BlockKind.HEADING -> {
+                val scale = when (block.level) { 1 -> 1.45f; 2 -> 1.3f; 3 -> 1.15f; else -> 1.05f }
+                Text(
+                    text,
+                    style = body.copy(
+                        fontSize = (reader.textSizeSp * scale).sp,
+                        lineHeight = (reader.textSizeSp * scale * 1.4f).sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
             BlockKind.BULLET, BlockKind.NUMBERED -> Row(Modifier.padding(start = (block.level * 20).dp)) {
                 Text(
                     if (block.kind == BlockKind.BULLET) bulletFor(block.level) else block.marker,
-                    style = type.bodyLarge,
+                    style = body,
                     modifier = Modifier.widthIn(min = 22.dp).padding(end = 6.dp),
                 )
-                Text(text, style = type.bodyLarge)
+                Text(text, style = body)
             }
             BlockKind.QUOTE -> Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
                 Spacer(Modifier.width(10.dp))
-                Text(text, style = type.bodyLarge, fontStyle = FontStyle.Italic)
+                Text(text, style = body, fontStyle = FontStyle.Italic)
             }
-            BlockKind.CODE -> Text(text, style = type.bodyMedium, fontFamily = FontFamily.Monospace)
-            BlockKind.PARAGRAPH -> Text(text, style = type.bodyLarge)
+            BlockKind.CODE -> Text(text, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+            BlockKind.PARAGRAPH -> Text(text, style = body)
         }
     }
 }

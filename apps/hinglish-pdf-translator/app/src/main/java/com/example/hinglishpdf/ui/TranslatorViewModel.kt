@@ -12,7 +12,8 @@ import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
 import com.example.hinglishpdf.data.settings.GeminiKeyStore
-import com.example.hinglishpdf.data.GEMINI_MODEL_NAME
+import com.example.hinglishpdf.ui.reader.ReaderFont
+import com.example.hinglishpdf.ui.reader.ReaderStyle
 import com.example.hinglishpdf.service.LiveStatus
 import com.example.hinglishpdf.service.TranslationService
 import kotlinx.coroutines.CancellationException
@@ -37,7 +38,8 @@ data class TranslatorUiState(
     /** False until a Gemini API key is available (BuildConfig or pasted in the app). */
     val geminiConfigured: Boolean = false,
     val geminiKeySource: GeminiKeyStore.Source = GeminiKeyStore.Source.NONE,
-    val geminiModel: String = GEMINI_MODEL_NAME,
+    /** The Gemini model that answered last; null until the first page (picked automatically). */
+    val geminiModel: String? = null,
     val books: List<BookWithProgress> = emptyList(),
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
@@ -86,14 +88,15 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     private val local = MutableStateFlow(LocalState())
 
     val state: StateFlow<TranslatorUiState> = combine(
-        app.geminiKey.key,
+        combine(app.geminiKey.key, app.activeGeminiModel, ::Pair),
         app.db.bookDao().observeAll(),
         // Only the coarse status here; the per-token text has its own flow below.
         app.monitor.status.map { it.copy(liveText = "", pageTranslations = emptyList()) }.distinctUntilChanged(),
         local,
-    ) { key, books, live, l ->
+    ) { (key, model), books, live, l ->
         TranslatorUiState(
             geminiConfigured = key.isNotBlank(),
+            geminiModel = model,
             geminiKeySource = app.geminiKey.source,
             books = books,
             selectedBookId = l.selectedBookId,
@@ -138,6 +141,13 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     }
 
     fun select(bookId: Long) = local.update { it.copy(selectedBookId = bookId) }
+
+    /** Font and size for translated text, from the "Aa" sheet; saved on the phone. */
+    val readerStyle: StateFlow<ReaderStyle> = app.readerSettings.style
+
+    fun setReaderFont(font: ReaderFont) = app.readerSettings.setFont(font)
+
+    fun setReaderTextSize(sp: Float) = app.readerSettings.setTextSize(sp)
 
     /** Stores a pasted key on this phone (used only when the build has none). */
     fun saveApiKey(key: String) {

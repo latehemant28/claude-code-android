@@ -4,8 +4,9 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.translate.TranslationUnit
 
 /**
- * The translation prompt and the parser that maps Gemini's answer back onto
- * the chunk's headings, bullets and paragraphs.
+ * The translation prompt (English → conversational Devanagari Hindi) and the
+ * parser that maps Gemini's answer back onto the chunk's headings, bullets
+ * and paragraphs.
  *
  * [SYSTEM_PROMPT] is embedded exactly as specified and set once as the
  * model's system instruction. Each request then carries only the chunk, as
@@ -14,28 +15,29 @@ import com.example.hinglishpdf.data.translate.TranslationUnit
  */
 object HinglishPrompt {
 
-    /** Embedded exactly as specified (line breaks and spacing included). */
+    /**
+     * Embedded exactly as specified (line breaks and spacing included). The
+     * specified text ended without closing the <examples> tag (it looks cut
+     * off), so the closing </examples> line is the one addition.
+     */
     val SYSTEM_PROMPT = """
-        You are a literary translator who converts English text into natural Hinglish (Hindi written in Roman script, mixed with common English words), the way an educated Indian would narrate a story aloud.
+        You are an expert, context-aware translator translating English books into natural, conversational Hindi using the Devanagari script (हिंदी). 
 
-        RULES:
-        1. Do NOT translate word by word. Read the full sentence, understand its meaning, then retell it naturally in Hinglish.
-        2. Keep the original tense and narrative voice. If the source is in past tense, use tha/thi/the throughout. Never switch to present tense.
-        3. Language mix:
-           - Keep English only for words people commonly use in daily Hinglish (for example: philosopher, simple, happiness, city, life).
-           - Use simple, natural Hindi for everything else. Avoid heavy or bookish Hindi.
-           - Do not leave literary or abstract words in English if a natural Hindi word exists (for example, use "uljha hua" instead of "chaotic", "bekaar" instead of "absurd").
-        4. Idioms: never translate idioms literally. Use the natural Hindi equivalent.
-           Example: "heart of the matter" becomes "asli baat", and "anxious eyes" becomes "ghabrayi hui aankhen".
-        5. Keep the literary tone and rhythm of the original. Use short, flowing sentences. Do not make it sound like casual chat or a text message.
-        6. Do not add, remove or explain anything. Keep all the meaning and details of the original.
-        7. Use Roman script only. No Devanagari.
-        8. Output only the translation, with no notes, headings or commentary.
+        <rules>
+        1. Script & Tone: Use the Devanagari script. Keep it casual, modern, and easy to read, exactly like how modern urban Indians speak.
+        2. Context-Awareness (Crucial): Analyze the genre and tone of the text. Automatically adapt the pronouns (आप vs तुम) and style based on the context (e.g., use 'आप' for philosophical/respectful dialogues, and 'तुम' for friendly/casual fiction).
+        3. Vocabulary: Do NOT use highly formal, pure, or academic Hindi words (avoid 'विकल्प', 'निर्णय', 'समावेश'). Use common English words written in Devanagari (e.g., 'ऑप्शन', 'डिसाइड', 'सिस्टम', 'प्लान'). You can also leave highly technical words in the English script.
+        4. Formatting & Labels: Maintain exact formatting, paragraphs, and bullet points. Do NOT translate speaker labels, character names, or structural tags (e.g., keep 'YOUTH:', 'PHILOSOPHER:', 'Chapter 1' exactly as they are in English).
+        5. Output: Output ONLY the translated text. Never add conversational filler, introductions, or explanations.
+        </rules>
 
-        STYLE EXAMPLE:
-        English: "A young man who was dissatisfied with life went to visit this philosopher."
-        Good Hinglish: "Zindagi se naakhush ek naujawan us philosopher se milne gaya."
-        Bad Hinglish: "Life se dissatisfied ek young man is philosopher ko visit karne gaya."
+        <examples>
+        English: Believe me, he had no other option, so he decided to plan this.
+        Modern Hindi: मेरा यकीन मानिए, उसके पास कोई और ऑप्शन नहीं था, इसलिए उसने यह प्लान डिसाइड किया।
+
+        English: The system architecture is quite complex, but we can optimize the database queries easily.
+        Modern Hindi: सिस्टम आर्किटेक्चर थोड़ा कॉम्प्लेक्स है, लेकिन हम डेटाबेस क्वेरीज को आसानी से ऑप्टिमाइज़ कर सकते हैं।
+        </examples>
     """.trimIndent()
 
     /** The user message for one chunk: the chunk itself (the instructions are in [SYSTEM_PROMPT]). */
@@ -73,12 +75,11 @@ object HinglishPrompt {
         return blocks.mapIndexed { i, block -> stripMarker(block, units[i]).trim().takeIf { it.isNotEmpty() } }
     }
 
-    fun containsDevanagari(text: String): Boolean = text.any { it in 'ऀ'..'ॿ' }
-
     /**
      * Removes what the model sometimes wraps around the translation: a code
-     * fence, echoed tags, a "Here is..." line, or a leading "Hinglish:" /
-     * "Good Hinglish:" label (the prompt's style example uses one).
+     * fence, echoed tags, a "Here is..." line, or a leading "Modern Hindi:"
+     * label (the prompt's examples use one). Speaker labels such as "YOUTH:"
+     * are part of the text and are kept.
      */
     private fun stripFiller(raw: String): String {
         var text = raw.replace("\r\n", "\n").trim()
@@ -128,7 +129,7 @@ object HinglishPrompt {
     }
 
     /**
-     * The style example puts its sentences in quotes, so Gemini sometimes
+     * Example sentences in prompts are often quoted, so Gemini sometimes
      * wraps a whole answer in them. Remove those quotes unless the original
      * text was itself a quotation.
      */
@@ -146,7 +147,7 @@ object HinglishPrompt {
     private val CODE_FENCE = Regex("^```[a-zA-Z]*\\s*$", RegexOption.MULTILINE)
     private val XML_TAG = Regex("</?(input|output|translation)>", RegexOption.IGNORE_CASE)
     private val PREAMBLE = Regex("^(here is|here's|sure)[^\\n]*:\\s*\\n", RegexOption.IGNORE_CASE)
-    private val LABEL = Regex("^((good )?hinglish|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
+    private val LABEL = Regex("^((modern |good )?(hindi|hinglish)|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
     private val HEADING_MARK = Regex("^#{1,6}\\s*")
     private val BULLET_MARK = Regex("^[-*•●◦▪]\\s+")
     private val NUMBER_MARK = Regex("^\\(?\\d{1,3}[.)]\\s+")
