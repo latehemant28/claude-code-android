@@ -73,10 +73,22 @@ data class PipelineConfig(
     val wordGapEm: Float = 0.15f,
     /** Narrowest gutter between two columns, in points. */
     val minGutter: Float = 8f,
-    /** Lines narrower than this share of the text width are candidates for columns. */
-    val narrowLineRatio: Float = 0.6f,
-    /** Least lines a column region needs. */
-    val minColumnLines: Int = 4,
+    /** X-Y cut: horizontal whitespace at least this high (body font sizes) cuts a region into bands. */
+    val xyBandGapEm: Float = 0.5f,
+    /** X-Y cut: vertical whitespace at least this wide (body font sizes, and [minGutter]) cuts a band into columns. */
+    val xyColumnGapEm: Float = 1.0f,
+    /** X-Y cut: lines (or tables, figures) each side of a column cut needs at least. */
+    val xyMinColumnItems: Int = 2,
+    /**
+     * X-Y cut: bands one above the other whose gutters line up are one
+     * column region, so a paragraph gap that happens to line up across the
+     * columns does not make the page read row by row.
+     */
+    val xyMergeAlignedBands: Boolean = true,
+    /** Footnotes are read after the rest of their page. */
+    val footnotesLast: Boolean = true,
+    /** How much each signal counts towards each block role (see [LayoutWeights]). */
+    val weights: LayoutWeights = LayoutWeights(),
     /**
      * In a column region, a column whose lines run on into a lower-case
      * next line less often than this is read line by line, each line its own
@@ -156,3 +168,53 @@ data class PipelineConfig(
         }
     }
 }
+
+/**
+ * Stage 1 block classification: each signal adds its weight to a role's
+ * score and the highest score wins (ties go to body text). A signal only
+ * counts where it applies: the margin-zone signals only in the top or
+ * bottom zone, the caption signals only for short blocks, and so on.
+ */
+data class LayoutWeights(
+    /** Every block's score as running text. */
+    val body: Float = 1.0f,
+    /** Every block's score as "unknown". */
+    val unknown: Float = 0.2f,
+    /** In the top / bottom margin zone: towards header / footer and page number. */
+    val marginZone: Float = 0.6f,
+    /** Repeated on enough pages of its side, or a run of them: towards header / footer. */
+    val repetition: Float = 1.0f,
+    /** Shaped like a page number (in a margin zone). */
+    val pageNumberPattern: Float = 1.1f,
+    /** Shaped like a running head whose number follows the page (in a margin zone, set apart). */
+    val runningHeadPattern: Float = 0.6f,
+    /** Taken off a running-head shape that could be a one-line footnote. */
+    val footnoteLikePenalty: Float = 0.8f,
+    /** A printer's mark or a "left blank" page. */
+    val boilerplatePattern: Float = 3.0f,
+    /** Small, set apart, in a margin zone, and nothing else: a stray note. */
+    val strayMargin: Float = 1.3f,
+    /** Set in a larger font tier than the body. */
+    val headingTier: Float = 1.5f,
+    /** A short bold line without closing punctuation. */
+    val boldHeading: Float = 1.2f,
+    /** Starts with a bullet. */
+    val bullet: Float = 2.0f,
+    /** Starts with a number or letter and a point, where a list can start. */
+    val numbered: Float = 1.5f,
+    /** Starts like "Figure 3." / "Table 2:". */
+    val captionPattern: Float = 1.2f,
+    /** Short and right above or below an image. */
+    val nearImage: Float = 1.2f,
+    /** Drawn inside an image. */
+    val insideFigure: Float = 3.0f,
+    /** Small and low on the page. */
+    val footnoteZone: Float = 0.9f,
+    /** Starts with a footnote number or mark. */
+    val footnoteMark: Float = 0.5f,
+    /** Right after a footnote, in the same small type. */
+    val footnoteContinues: Float = 0.5f,
+    /** In a table. */
+    val tableCell: Float = 4.0f,
+)
+

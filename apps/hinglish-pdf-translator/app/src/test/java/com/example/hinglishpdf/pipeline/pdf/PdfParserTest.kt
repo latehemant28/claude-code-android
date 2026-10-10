@@ -117,6 +117,19 @@ class PdfParserTest {
     }
 
     @Test
+    fun `images are located on the page, top-left origin like the text`() {
+        PDDocument.load(write(scannedPages = 1)).use { doc ->
+            val scan = PdfParser.readGlyphs(doc).last()
+            // Drawn at x 50, y 50 from the bottom, 400 x 600, on an A4 page (842 pt high).
+            val box = scan.imageBoxes.single()
+            assertEquals(50f, box.x0, 0.5f)
+            assertEquals(450f, box.x1, 0.5f)
+            assertEquals(PDRectangle.A4.height - 650f, box.y0, 0.5f)
+            assertEquals(PDRectangle.A4.height - 50f, box.y1, 0.5f)
+        }
+    }
+
+    @Test
     fun `a mostly scanned pdf needs ocr`() {
         val doc = PdfParser.parse(write(scannedPages = 3), temp.root)
         assertEquals(listOf(3, 4, 5), doc.scannedPages)

@@ -122,9 +122,11 @@ class PipelineStore(private val dao: PipelineDao) {
         /**
          * Raised when parsing changes in a way that makes stored parses
          * outdated. 2: page furniture, columns by region, font tiers,
-         * paragraphs joined across pages, columns and files.
+         * paragraphs joined across pages, columns and files. 3: stage 1
+         * layout (X-Y cut reading order, weighted block classification,
+         * tables and figures read where they stand, footnotes last).
          */
-        const val PARSER_VERSION = 2
+        const val PARSER_VERSION = 3
 
         private val gson = Gson()
         private val tagsType = object : TypeToken<List<PlaceholderTag>>() {}.type

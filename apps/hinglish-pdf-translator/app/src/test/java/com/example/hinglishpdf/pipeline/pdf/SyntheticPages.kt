@@ -28,6 +28,13 @@ internal class PageBuilder(val number: Int, val width: Float = 600f, val height:
         return baseline + texts.size * leading
     }
 
+    /** Writes [texts] as lines from [baseline] down and returns the box they cover (ground truth for a region). */
+    fun block(texts: List<String>, x: Float, baseline: Float, leading: Float = 12f, size: Float = 10f, bold: Boolean = false): Box {
+        var right = x
+        texts.forEachIndexed { i, t -> right = maxOf(right, text(t, x, baseline + i * leading, size, bold)) }
+        return Box(x, baseline - 0.8f * size, right, baseline + (texts.size - 1) * leading + 0.25f * size)
+    }
+
     fun image(box: Box) {
         images++
         imageBoxes += box

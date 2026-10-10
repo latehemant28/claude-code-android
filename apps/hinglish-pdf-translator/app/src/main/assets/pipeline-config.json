@@ -35,8 +35,11 @@
   "columnGapEm": 1.0,
   "wordGapEm": 0.15,
   "minGutter": 8.0,
-  "narrowLineRatio": 0.6,
-  "minColumnLines": 4,
+  "xyBandGapEm": 0.5,
+  "xyColumnGapEm": 1.0,
+  "xyMinColumnItems": 2,
+  "xyMergeAlignedBands": true,
+  "footnotesLast": true,
   "columnMinFlow": 0.3,
   "tableCellMaxRatio": 0.45,
   "tableCellMeanRatio": 0.3,
@@ -55,5 +58,28 @@
   "standaloneMinCount": 2,
 
   "chunkMaxParagraphs": 3,
-  "chunkMaxWords": 800
+  "chunkMaxWords": 800,
+
+  "weights": {
+    "body": 1.0,
+    "unknown": 0.2,
+    "marginZone": 0.6,
+    "repetition": 1.0,
+    "pageNumberPattern": 1.1,
+    "runningHeadPattern": 0.6,
+    "footnoteLikePenalty": 0.8,
+    "boilerplatePattern": 3.0,
+    "strayMargin": 1.3,
+    "headingTier": 1.5,
+    "boldHeading": 1.2,
+    "bullet": 2.0,
+    "numbered": 1.5,
+    "captionPattern": 1.2,
+    "nearImage": 1.2,
+    "insideFigure": 3.0,
+    "footnoteZone": 0.9,
+    "footnoteMark": 0.5,
+    "footnoteContinues": 0.5,
+    "tableCell": 4.0
+  }
 }

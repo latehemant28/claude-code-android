@@ -363,24 +363,28 @@ segmentation and paragraph-based translation are in place
   translations back with their tags (a paragraph joined across two files is
   split back into both), sets `dc:language` / `xml:lang`, copies every other
   file byte for byte, and its output passes EPUBCheck.
-- **PDF** ([`PdfParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfParser.kt),
-  [`PdfLayout.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfLayout.kt)):
+- **PDF, stage 1: physical layout** ([`layout/`](app/src/main/java/com/example/hinglishpdf/pipeline/layout),
+  [`PdfParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfParser.kt)):
   scanned pages are detected (a mostly scanned book stops with "needs
-  OCR"). Every block is classified as body, heading, list item, header,
-  footer, page number, caption, table cell, footnote, boilerplate or
-  unknown, from its margin zone, repetition across pages (odd and even
-  pages counted apart, or a run of pages for a chapter's running head),
-  font size and the configured patterns (a running head's number must move
-  with the page, so a one-line footnote is not taken for one). Furniture is
-  kept with its page and box for the rebuilder but never translated.
-  Pages left blank on purpose, printer's slugs and pages with only a
-  number are boilerplate. Columns are found per region and read one at a
-  time (columns of entries such as addresses keep one block per line;
-  tables need text that does not run on down a column). Paragraphs break at
-  a gap over 1.3× the measured line spacing or a first-line indent; list
-  items keep their bullet as marker and their nesting; captions are found by
-  pattern, by an image next to them or inside a figure; every block keeps
-  its font tier (0 body, 1, 2… larger sizes, −1 smaller).
+  OCR"). Glyphs become lines; furniture is classified line by line; text
+  inside images, tables (with row and column of every cell) and the rest
+  are ordered by **recursive X-Y cut**, chosen over Docstrum because
+  born-digital book pages are unskewed Manhattan layouts and the cut tree is
+  the reading order (bands whose gutters line up are merged first, so an
+  aligned paragraph gap never makes two columns read row by row). Every
+  block gets exactly one role (body, heading, list item, caption, table
+  cell, footnote, header, footer, page number, boilerplate, unknown) by
+  **weighted signals**, all in the config: margin zone, repetition across
+  pages (odd and even pages apart, or a run of pages), font tier, patterns
+  (page numbers, running heads whose number follows the page, "Figure n",
+  footnote marks, "intentionally left blank", printer's slugs), an image
+  next to it or around it, bullet or number plus indent. Output: a
+  `PageLayout` per page with blocks (role, box, font tier, column, reading
+  index, lines, scores) and the furniture kept apart for the merger.
+  Footnotes are read after the rest of the page. Reading order is measured
+  in the tests with the ICDAR 2013 method of Clausner et al.
+  ([`ReadingOrderMetric.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/layout/ReadingOrderMetric.kt):
+  pairwise relations, the paper's penalty matrix, s = 1 / (e / e50 + 1)).
 - **Document assembly** ([`DocumentAssembler.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/DocumentAssembler.kt)):
   one text stream for the whole book. A paragraph cut by a page, column or
   EPUB file break is joined back when the first half lacks terminal
