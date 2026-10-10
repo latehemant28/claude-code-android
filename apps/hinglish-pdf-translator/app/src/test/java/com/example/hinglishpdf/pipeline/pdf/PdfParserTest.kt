@@ -64,9 +64,12 @@ class PdfParserTest {
             PDPage(PDRectangle.A4).also { page ->
                 doc.addPage(page)
                 PDPageContentStream(doc, page).use { s ->
+                    // The left column ends its paragraph, so the right one is a paragraph of its own.
+                    val left = listOf("Left text of the page starts", "and runs on from line", "to line down the column", "until it is done.")
+                    val right = listOf("Right text of the page", "goes on in the same", "way through the second", "column of the page")
                     for (i in 0 until 4) {
-                        s.line(regular, 11f, 60f, 100f + i * 14, "Left text line ${i + 1} of the page")
-                        s.line(regular, 11f, 320f, 100f + i * 14, "Right text line ${i + 1} of the page")
+                        s.line(regular, 11f, 60f, 100f + i * 14, left[i])
+                        s.line(regular, 11f, 320f, 100f + i * 14, right[i])
                     }
                 }
             }
@@ -103,8 +106,8 @@ class PdfParserTest {
             page1.map { it.role to it.text },
         )
         val page2 = doc.paragraphs.filter { (it.ref as com.example.hinglishpdf.pipeline.segment.SourceRef.Pdf).page == 2 }.map { it.text }
-        assertTrue(page2.first(), page2.first().startsWith("Left text line 1 of the page Left text line 2"))
-        assertTrue(page2.last(), page2.last().startsWith("Right text line 1 of the page"))
+        assertEquals("Left text of the page starts and runs on from line to line down the column until it is done.", page2.first())
+        assertEquals("Right text of the page goes on in the same way through the second column of the page", page2.last())
         assertEquals("2", doc.metadata["multiColumnPages"])
 
         assertEquals(

@@ -53,7 +53,7 @@ data class ParagraphEntity(
     val tags: String,
     /** JSON source reference: EPUB file + XPath, or PDF page + box. */
     val ref: String,
-    /** JSON text style (PDF), or null. */
+    /** JSON layout: text style (PDF), font tier, column, list marker, source parts (see PipelineStore.layoutToJson); or null. */
     val style: String?,
     val translatable: Boolean,
 )

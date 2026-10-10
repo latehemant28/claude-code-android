@@ -10,6 +10,7 @@ import com.example.hinglishpdf.pipeline.segment.ParsedDocument
 import com.example.hinglishpdf.pipeline.segment.ParsedParagraph
 import com.example.hinglishpdf.pipeline.segment.ParsedSegment
 import com.example.hinglishpdf.pipeline.segment.PlaceholderTag
+import com.example.hinglishpdf.pipeline.segment.SourcePart
 import com.example.hinglishpdf.pipeline.segment.SourceRef
 import com.example.hinglishpdf.pipeline.segment.TextStyle
 import com.google.gson.Gson
@@ -46,7 +47,7 @@ class PipelineStore(private val dao: PipelineDao) {
                 text = p.text,
                 tags = gson.toJson(p.tags),
                 ref = refToJson(p.ref),
-                style = p.style?.let(gson::toJson),
+                style = layoutToJson(p),
                 translatable = p.translatable,
             )
         }
@@ -74,13 +75,22 @@ class PipelineStore(private val dao: PipelineDao) {
         val paragraphRows = dao.paragraphs(bookId)
         val ordinalById = paragraphRows.associate { it.id to it.ordinal }
         val paragraphs = paragraphRows.map { row ->
+            val ref = refFromJson(row.ref)
+            val layout = row.style?.let { JsonParser.parseString(it).asJsonObject }
             ParsedParagraph(
-                role = ParagraphRole.valueOf(row.role),
+                role = ParagraphRole.entries.firstOrNull { it.name == row.role } ?: ParagraphRole.UNKNOWN,
                 text = row.text,
                 tags = gson.fromJson(row.tags, tagsType),
-                ref = refFromJson(row.ref),
+                ref = ref,
                 level = row.level,
-                style = row.style?.let { gson.fromJson(it, TextStyle::class.java) },
+                style = layout?.takeIf { it.has("font") }?.let { gson.fromJson(it, TextStyle::class.java) },
+                tier = layout?.get("tier")?.asInt ?: 0,
+                column = layout?.get("column")?.asInt ?: 0,
+                marker = layout?.get("marker")?.asString,
+                parts = layout?.get("parts")?.asJsonArray?.map { e ->
+                    val o = e.asJsonObject
+                    SourcePart(o["index"].asInt, refFromJson(o["ref"].toString()), o["start"].asInt, o["idOffset"].asInt)
+                } ?: listOfNotNull(layout?.get("source")?.asInt?.let { SourcePart(it, ref, 0, 0) }),
             )
         }
         val segments = dao.segments(bookId).map { row ->
@@ -109,13 +119,48 @@ class PipelineStore(private val dao: PipelineDao) {
     }
 
     companion object {
-        /** Raised when parsing changes in a way that makes stored parses outdated. */
-        const val PARSER_VERSION = 1
+        /**
+         * Raised when parsing changes in a way that makes stored parses
+         * outdated. 2: page furniture, columns by region, font tiers,
+         * paragraphs joined across pages, columns and files.
+         */
+        const val PARSER_VERSION = 2
 
         private val gson = Gson()
         private val tagsType = object : TypeToken<List<PlaceholderTag>>() {}.type
         private val metadataType = object : TypeToken<Map<String, String>>() {}.type
         private val pagesType = object : TypeToken<List<Int>>() {}.type
+
+        /**
+         * The paragraph's layout for the `style` column: its text style
+         * (PDF) with font tier, column, list marker and source parts beside
+         * it. Null when there is nothing to keep.
+         */
+        fun layoutToJson(p: ParsedParagraph): String? {
+            val o = p.style?.let { gson.toJsonTree(it).asJsonObject } ?: JsonObject()
+            if (p.tier != 0) o.addProperty("tier", p.tier)
+            if (p.column != 0) o.addProperty("column", p.column)
+            p.marker?.let { o.addProperty("marker", it) }
+            when {
+                p.parts.size > 1 -> o.add(
+                    "parts",
+                    JsonArray().apply {
+                        p.parts.forEach { part ->
+                            add(
+                                JsonObject().apply {
+                                    addProperty("index", part.index)
+                                    add("ref", JsonParser.parseString(refToJson(part.ref)))
+                                    addProperty("start", part.start)
+                                    addProperty("idOffset", part.idOffset)
+                                },
+                            )
+                        }
+                    },
+                )
+                p.parts.size == 1 -> o.addProperty("source", p.parts.single().index)
+            }
+            return if (o.size() == 0) null else o.toString()
+        }
 
         fun refToJson(ref: SourceRef): String = when (ref) {
             is SourceRef.Epub -> JsonObject().apply {

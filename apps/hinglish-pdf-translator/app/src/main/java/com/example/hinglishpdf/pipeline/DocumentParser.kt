@@ -13,11 +13,11 @@ class NeedsOcrException(scanned: Int, pages: Int) : IllegalStateException(
 )
 
 /** The pipeline's Parser + Segmenter stage: the right parser for the format. */
-class DocumentParser(private val tempDir: File?) {
+class DocumentParser(private val tempDir: File?, private val config: () -> PipelineConfig = { PipelineConfig() }) {
 
     fun parse(file: File, format: DocFormat, onProgress: (label: String, done: Int, total: Int) -> Unit = { _, _, _ -> }): ParsedDocument =
         when (format) {
-            DocFormat.EPUB -> EpubParser.parse(file)
-            DocFormat.PDF -> PdfParser.parse(file, tempDir) { page, count -> onProgress("Analysing page $page of $count", page, count) }
+            DocFormat.EPUB -> EpubParser.parse(file, config())
+            DocFormat.PDF -> PdfParser.parse(file, tempDir, config()) { page, count -> onProgress("Analysing page $page of $count", page, count) }
         }
 }

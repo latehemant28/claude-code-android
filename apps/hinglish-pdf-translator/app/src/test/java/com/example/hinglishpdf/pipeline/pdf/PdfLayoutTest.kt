@@ -8,31 +8,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Layout analysis on synthetic pages: every glyph placed by hand, 0.5 em wide, words 0.3 em apart. */
+/** Layout analysis on synthetic pages (see [PageBuilder]). */
 class PdfLayoutTest {
-
-    private class PageBuilder(val number: Int, val width: Float = 600f, val height: Float = 800f) {
-        val glyphs = mutableListOf<PdfGlyph>()
-        var images = 0
-
-        /** Writes [text] from [x] on [baseline]; returns the x after it. */
-        fun text(text: String, x: Float, baseline: Float, size: Float = 10f, bold: Boolean = false, italic: Boolean = false, font: String = "Serif"): Float {
-            var at = x
-            for (c in text) {
-                if (c == ' ') {
-                    at += 0.3f * size
-                } else {
-                    glyphs += PdfGlyph(c.toString(), at, baseline, 0.5f * size, size, font, bold, italic)
-                    at += 0.5f * size
-                }
-            }
-            return at
-        }
-
-        fun build() = PdfPageGlyphs(number, width, height, glyphs.toList(), images)
-    }
-
-    private fun page(number: Int = 1, block: PageBuilder.() -> Unit) = PageBuilder(number).apply(block).build()
 
     private fun texts(result: PdfLayoutResult) = result.paragraphs.map { it.role to it.text }
 
@@ -68,9 +45,11 @@ class PdfLayoutTest {
             listOf(
                 page {
                     text("A Title Spanning Both Columns Of This Page Here And There", 50f, 60f, size = 16f)
+                    val left = listOf("The left column starts here", "and carries its sentence on", "down the narrow column to", "the end of its last line.")
+                    val right = listOf("The right column has its own", "story, which also runs on", "from one line to the next", "until it stops right here.")
                     for (i in 0 until 4) {
-                        text("Left column line number ${i + 1} goes", 50f, 100f + i * 12, size = 10f)
-                        text("Right column line number ${i + 1} goes", 320f, 100f + i * 12, size = 10f)
+                        text(left[i], 50f, 100f + i * 12, size = 10f)
+                        text(right[i], 320f, 100f + i * 12, size = 10f)
                     }
                 },
             ),
@@ -78,10 +57,11 @@ class PdfLayoutTest {
         val paragraphs = texts(result)
         assertEquals(ParagraphRole.HEADING, paragraphs[0].first)
         assertEquals(
-            "Left column line number 1 goes Left column line number 2 goes Left column line number 3 goes Left column line number 4 goes",
+            "The left column starts here and carries its sentence on down the narrow column to the end of its last line.",
             paragraphs[1].second,
         )
-        assertTrue(paragraphs[2].second.startsWith("Right column line number 1 goes"))
+        assertEquals("The right column has its own story, which also runs on from one line to the next until it stops right here.", paragraphs[2].second)
+        assertEquals(listOf(0, 1, 2), result.paragraphs.map { it.column })
         assertEquals(mapOf(1 to 2), result.columns)
     }
 
@@ -114,8 +94,12 @@ class PdfLayoutTest {
             }
         }
         val result = PdfLayout.analyze(pages)
-        assertEquals((1..4).map { "Body text of page $it is here." }, result.paragraphs.map { it.text })
+        assertEquals((1..4).map { "Body text of page $it is here." }, result.paragraphs.filter { it.translatable }.map { it.text })
         assertEquals(8, result.droppedLines)
+        // Kept, with their place, for the rebuilder.
+        val furniture = result.paragraphs.filter { it.role.furniture }
+        assertEquals(List(4) { ParagraphRole.HEADER } + List(4) { ParagraphRole.PAGE_NUMBER }, furniture.map { it.role }.sorted())
+        assertEquals((1..4).toList(), furniture.filter { it.role == ParagraphRole.PAGE_NUMBER }.map { (it.ref as SourceRef.Pdf).page })
     }
 
     @Test

@@ -13,6 +13,7 @@ import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.settings.AppPreferences
 import com.example.hinglishpdf.data.settings.ProviderSettings
 import com.example.hinglishpdf.pipeline.DocumentParser
+import com.example.hinglishpdf.pipeline.PipelineConfig
 import com.example.hinglishpdf.pipeline.PipelineStore
 import com.example.hinglishpdf.service.Notifications
 import com.example.hinglishpdf.service.TranslationMonitor
@@ -44,7 +45,10 @@ class HinglishApp : Application() {
     val db by lazy { AppDatabase.create(this) }
 
     /** The pipeline's parser (paragraphs, sentence segments, source map) and where its results are kept. */
-    val documentParser by lazy { DocumentParser(cacheDir) }
+    val documentParser by lazy { DocumentParser(cacheDir) { pipelineConfig } }
+
+    /** Thresholds and patterns of the parser, assembler and chunker (assets/pipeline-config.json). */
+    val pipelineConfig by lazy { PipelineConfig.load(this) }
     val pipelineStore by lazy { PipelineStore(db.pipelineDao()) }
     val translationRepository by lazy {
         TranslationRepository(

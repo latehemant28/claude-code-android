@@ -1,8 +1,14 @@
 package com.example.hinglishpdf.pipeline.pdf
 
 import com.example.hinglishpdf.data.pdf.PdfPasswordProtectedException
+import com.example.hinglishpdf.pipeline.PipelineConfig
+import com.example.hinglishpdf.pipeline.assemble.DocumentAssembler
+import com.example.hinglishpdf.pipeline.segment.Box
 import com.example.hinglishpdf.pipeline.segment.ParsedDocument
 import com.example.hinglishpdf.pipeline.segment.Segmenter
+import com.tom_roush.pdfbox.contentstream.operator.Operator
+import com.tom_roush.pdfbox.cos.COSBase
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
@@ -24,7 +30,12 @@ import java.io.Writer
 object PdfParser {
 
     /** [tempDir]: where PDFBox may buffer a large document instead of the heap. */
-    fun parse(file: File, tempDir: File?, onPage: (page: Int, pageCount: Int) -> Unit = { _, _ -> }): ParsedDocument {
+    fun parse(
+        file: File,
+        tempDir: File?,
+        config: PipelineConfig = PipelineConfig(),
+        onPage: (page: Int, pageCount: Int) -> Unit = { _, _ -> },
+    ): ParsedDocument {
         val memory = MemoryUsageSetting.setupTempFileOnly().let { if (tempDir != null) it.setTempDir(tempDir) else it }
         val document = try {
             PDDocument.load(file, memory)
@@ -33,7 +44,9 @@ object PdfParser {
         }
         return document.use { doc ->
             val pages = readGlyphs(doc, onPage)
-            val layout = PdfLayout.analyze(pages)
+            val layout = PdfLayout.analyze(pages, config)
+            // Running text joined across pages and columns, before it is cut into sentences.
+            val paragraphs = DocumentAssembler(config, layout.hyphenation).assemble(layout.paragraphs)
             val info = doc.documentInformation
             val metadata = buildMap {
                 info?.title?.takeIf { it.isNotBlank() }?.let { put("title", it.trim()) }
@@ -44,6 +57,7 @@ object PdfParser {
                 put("droppedRunningLines", layout.droppedLines.toString())
                 put("tables", layout.tables.toString())
                 if (layout.columns.isNotEmpty()) put("multiColumnPages", layout.columns.keys.joinToString(","))
+                if (layout.boilerplatePages.isNotEmpty()) put("boilerplatePages", layout.boilerplatePages.joinToString(","))
             }
             ParsedDocument(
                 title = metadata["title"],
@@ -53,8 +67,8 @@ object PdfParser {
                 pageCount = doc.numberOfPages,
                 scannedPages = layout.scannedPages,
                 needsOcr = layout.needsOcr,
-                paragraphs = layout.paragraphs,
-                segments = Segmenter.segment(layout.paragraphs),
+                paragraphs = paragraphs,
+                segments = Segmenter.segment(paragraphs),
             )
         }
     }
@@ -65,6 +79,7 @@ object PdfParser {
         return (1..count).map { number ->
             val page = doc.getPage(number - 1)
             collector.glyphs.clear()
+            collector.imageBoxes.clear()
             collector.startPage = number
             collector.endPage = number
             collector.writeText(doc, NullWriter)
@@ -77,6 +92,7 @@ object PdfParser {
                 height = if (rotated) box.width else box.height,
                 glyphs = collector.glyphs.toList(),
                 images = imageCount(page),
+                imageBoxes = if (page.rotation % 360 == 0) collector.imageBoxes.toList() else emptyList(),
             )
         }
     }
@@ -96,9 +112,34 @@ object PdfParser {
         return count(page.resources, 0)
     }
 
-    /** Every glyph PDFBox decodes, in drawing order (reading order is rebuilt by [PdfLayout]). */
+    /**
+     * Every glyph PDFBox decodes, in drawing order (reading order is rebuilt
+     * by [PdfLayout]), and where each image is drawn.
+     */
     private class GlyphCollector : PDFTextStripper() {
         val glyphs = mutableListOf<PdfGlyph>()
+        val imageBoxes = mutableListOf<Box>()
+
+        override fun processOperator(operator: Operator, operands: MutableList<COSBase>) {
+            if (operator.name == "Do") {
+                val name = operands.firstOrNull() as? COSName
+                val image = name?.let { runCatching { resources?.getXObject(it) }.getOrNull() } as? PDImageXObject
+                if (image != null) imageBoxes += imageBox()
+            }
+            super.processOperator(operator, operands)
+        }
+
+        /** An image fills the unit square of its transformation; mapped to top-left page coordinates. */
+        private fun imageBox(): Box {
+            val m = graphicsState.currentTransformationMatrix
+            val crop = currentPage.cropBox ?: currentPage.mediaBox
+            val corners = listOf(0f to 0f, 1f to 0f, 0f to 1f, 1f to 1f).map { (u, v) ->
+                val x = m.scaleX * u + m.shearX * v + m.translateX - crop.lowerLeftX
+                val y = m.shearY * u + m.scaleY * v + m.translateY - crop.lowerLeftY
+                x to crop.height - y
+            }
+            return Box(corners.minOf { it.first }, corners.minOf { it.second }, corners.maxOf { it.first }, corners.maxOf { it.second })
+        }
 
         override fun processTextPosition(text: TextPosition) {
             val unicode = text.unicode ?: return

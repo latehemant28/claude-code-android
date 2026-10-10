@@ -101,6 +101,18 @@ object Placeholders {
         }
     }
 
+    /** [text] with every placeholder id moved by [offset] (joining paragraphs keeps ids unique). */
+    fun shift(text: String, offset: Int): String {
+        if (offset == 0) return text
+        return TOKEN.replace(text) { m ->
+            if (m.groupValues[3].isNotEmpty()) {
+                "[[${m.groupValues[3]}_${m.groupValues[4].toInt() + offset}]]"
+            } else {
+                "{${m.groupValues[1]}${m.groupValues[2].toInt() + offset}}"
+            }
+        }
+    }
+
     /**
      * Compares a translation's placeholders with its source's: each one must
      * be there exactly once, in the same order, and paired ones properly
