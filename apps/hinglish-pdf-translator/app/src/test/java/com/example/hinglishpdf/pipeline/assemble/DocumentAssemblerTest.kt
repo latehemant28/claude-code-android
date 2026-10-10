@@ -71,9 +71,12 @@ class DocumentAssemblerTest {
     }
 
     @Test
-    fun `an upper-case start still joins when the next block is running text`() {
-        val out = assembler.assemble(listOf(p("The letter was signed by Mr", 1), p("Smith himself.", 2)))
-        assertEquals(listOf("The letter was signed by Mr Smith himself."), out.texts())
+    fun `only a start that is not a capital continues - lower case, a digit, a script without capitals`() {
+        assertEquals(2, assembler.assemble(listOf(p("The letter was signed by Mr", 1), p("Smith himself.", 2))).size)
+        assertEquals(1, assembler.assemble(listOf(p("The flood came in", 1), p("1910, and again later.", 2))).size)
+        assertEquals(1, assembler.assemble(listOf(p("उसने कहा कि", 1), p("वह कल आएगा।", 2))).size)
+        assertEquals(1, assembler.assemble(listOf(p("and she said", 1), p("“yes” to all of it.", 2))).size)
+        assertEquals(2, assembler.assemble(listOf(p("and she said", 1), p("“Yes,” he replied.", 2))).size)
     }
 
     @Test

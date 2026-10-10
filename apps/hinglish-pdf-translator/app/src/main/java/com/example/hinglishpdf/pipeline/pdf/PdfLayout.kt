@@ -247,6 +247,7 @@ object PdfLayout {
             tier = block.fontTier,
             column = block.column,
             marker = block.marker,
+            cell = block.cell,
         )
     }
 

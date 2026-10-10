@@ -2,11 +2,14 @@ package com.example.hinglishpdf.pipeline.epub
 
 import com.example.hinglishpdf.pipeline.PipelineConfig
 import com.example.hinglishpdf.pipeline.assemble.DocumentAssembler
+import com.example.hinglishpdf.pipeline.segment.ParagraphRole
 import com.example.hinglishpdf.pipeline.segment.ParsedDocument
+import com.example.hinglishpdf.pipeline.segment.TableCellRef
 import com.example.hinglishpdf.pipeline.segment.ParsedParagraph
 import com.example.hinglishpdf.pipeline.segment.Segmenter
 import com.example.hinglishpdf.pipeline.segment.SourcePart
 import com.example.hinglishpdf.pipeline.segment.SourceRef
+import org.jsoup.nodes.Element
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
@@ -28,9 +31,11 @@ object EpubParser {
 
     fun parse(file: File, config: PipelineConfig = PipelineConfig()): ParsedDocument = ZipFile(file).use { zip ->
         val epub = EpubPackage(zip)
+        val tables = mutableMapOf<Element, Int>()
         val units = epub.units().map { unit ->
             val encoded = unit.encode()
-            ParsedParagraph(role = unit.role, text = encoded.text, tags = encoded.tags, ref = unit.ref, level = unit.level)
+            val cell = (unit as? EpubUnit.Run)?.takeIf { it.role == ParagraphRole.TABLE_CELL }?.let { cellOf(it.owner, tables) }
+            ParsedParagraph(role = unit.role, text = encoded.text, tags = encoded.tags, ref = unit.ref, level = unit.level, cell = cell)
         }
         // Some publishers split a chapter into several files mid-paragraph: join those back.
         val paragraphs = DocumentAssembler(config).assemble(units)
@@ -46,6 +51,15 @@ object EpubParser {
             paragraphs = paragraphs,
             segments = Segmenter.segment(paragraphs),
         )
+    }
+
+    /** A cell's table (numbered in reading order across the book), row and column. */
+    private fun cellOf(cell: Element, tables: MutableMap<Element, Int>): TableCellRef? {
+        val row = cell.parents().firstOrNull { it.normalName().substringAfter(':') == "tr" } ?: return null
+        val table = row.parents().firstOrNull { it.normalName().substringAfter(':') == "table" } ?: return null
+        val rows = table.select("tr").filter { r -> r.parents().firstOrNull { it.normalName().substringAfter(':') == "table" } == table }
+        val cells = row.children().filter { it.normalName().substringAfter(':') in setOf("td", "th") }
+        return TableCellRef(tables.getOrPut(table) { tables.size }, rows.indexOf(row), cells.indexOf(cell))
     }
 }
 

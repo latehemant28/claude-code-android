@@ -6,6 +6,7 @@ import com.example.hinglishpdf.pipeline.pdf.PageKind
 import com.example.hinglishpdf.pipeline.pdf.PdfLayout
 import com.example.hinglishpdf.pipeline.pdf.PdfPageGlyphs
 import com.example.hinglishpdf.pipeline.segment.Box
+import com.example.hinglishpdf.pipeline.segment.TableCellRef
 
 /**
  * Stage 1, physical layout analysis: from page geometry to classified

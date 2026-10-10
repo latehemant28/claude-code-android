@@ -4,6 +4,7 @@ import com.example.hinglishpdf.pipeline.assemble.Hyphenation
 import com.example.hinglishpdf.pipeline.pdf.PageKind
 import com.example.hinglishpdf.pipeline.segment.Box
 import com.example.hinglishpdf.pipeline.segment.ParagraphRole
+import com.example.hinglishpdf.pipeline.segment.TableCellRef
 
 /**
  * What a block of a printed page is (stage 1, physical layout). Every block
@@ -58,9 +59,6 @@ data class TextLine(
         return if (total == 0) 0f else visible.sumOf { r -> if (r.bold) r.text.count { !it.isWhitespace() } else 0 }.toFloat() / total
     }
 }
-
-/** Where a table cell sits: which table on the page, row and column (0-based). */
-data class TableCellRef(val table: Int, val row: Int, val column: Int)
 
 /**
  * One block of a page: its role, box, font tier (0 body, 1..n larger sizes

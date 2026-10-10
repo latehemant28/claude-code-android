@@ -37,7 +37,7 @@ class DocumentAssembler(private val config: PipelineConfig, private val hyphenat
         var last: ParsedParagraph? = null // the source paragraph that paragraph ends with
         var skipped = false // blocks skipped over since then
         paragraphs.forEachIndexed { index, p ->
-            val single = p.copy(parts = listOf(SourcePart(index, p.ref, 0, 0)))
+            val single = p.copy(parts = listOf(SourcePart(index, p.ref, 0, 0, p.text.length)))
             if (p.role.transparent) {
                 out += single
                 skipped = true
@@ -70,15 +70,18 @@ class DocumentAssembler(private val config: PipelineConfig, private val hyphenat
         }
     }
 
-    /** True if [b] carries on the sentence [a] leaves unfinished. */
+    /**
+     * True if [b] carries on the sentence [a] leaves unfinished: [a] is
+     * running text without terminal punctuation, [b] is body text in the
+     * same font tier, and [b] does not start with a capital (lower case, a
+     * digit, or a script without capitals; leading quotes and brackets are
+     * looked past).
+     */
     internal fun continues(a: ParsedParagraph, b: ParsedParagraph): Boolean {
-        if (!a.role.body || a.tier != 0 || config.endsTerminally(a.text)) return false
-        if (b.tier != 0 || !(b.role == ParagraphRole.PARAGRAPH || b.role == ParagraphRole.QUOTE)) return false
-        val lowercase = Placeholders.strip(b.text).trimStart().firstOrNull()?.isLowerCase() == true
-        return when (a.role) {
-            ParagraphRole.PARAGRAPH -> b.role == ParagraphRole.PARAGRAPH || lowercase
-            else -> lowercase // a list item or quotation runs on only into a lower-case continuation
-        }
+        if (!a.role.body || config.endsTerminally(a.text)) return false
+        if (b.tier != a.tier || !(b.role == ParagraphRole.PARAGRAPH || b.role == ParagraphRole.QUOTE)) return false
+        val first = Placeholders.strip(b.text).firstOrNull { it.isLetterOrDigit() } ?: return false
+        return !first.isUpperCase() && !first.isTitleCase()
     }
 
     private fun join(a: ParsedParagraph, b: ParsedParagraph, index: Int): ParsedParagraph {
@@ -91,11 +94,13 @@ class DocumentAssembler(private val config: PipelineConfig, private val hyphenat
             else -> "$aText $bText"
         }
         val start = text.length - bText.length
+        // The first part now ends where the joining space (or the dropped hyphen) was.
+        val parts = a.parts.dropLast(1) + a.parts.last().copy(end = minOf(aText.length, start))
         return a.copy(
             text = text,
             tags = a.tags + b.tags.map { it.copy(id = it.id + offset) },
             lineBoxes = a.lineBoxes + b.lineBoxes.map { LineBox((it.range.first + start)..(it.range.last + start), it.page, it.box) },
-            parts = a.parts + SourcePart(index, b.ref, start, offset),
+            parts = parts + SourcePart(index, b.ref, start, offset, text.length),
         )
     }
 
@@ -109,9 +114,8 @@ class DocumentAssembler(private val config: PipelineConfig, private val hyphenat
         fun sourceTexts(paragraph: ParsedParagraph): List<String> {
             val parts = paragraph.parts
             if (parts.size <= 1) return listOf(paragraph.text)
-            return parts.mapIndexed { k, part ->
-                val end = parts.getOrNull(k + 1)?.start ?: paragraph.text.length
-                Placeholders.shift(paragraph.text.substring(part.start, end).trim(), -part.idOffset)
+            return paragraph.spans.mapIndexed { k, span ->
+                Placeholders.shift(paragraph.text.substring(span.start, span.end).trim(), -parts[k].idOffset)
             }
         }
 

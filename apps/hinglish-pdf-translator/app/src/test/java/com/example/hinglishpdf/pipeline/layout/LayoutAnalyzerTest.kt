@@ -5,6 +5,7 @@ import com.example.hinglishpdf.pipeline.PipelineConfig
 import com.example.hinglishpdf.pipeline.layout.ReadingOrderMetric.ReadingOrder
 import com.example.hinglishpdf.pipeline.pdf.page
 import com.example.hinglishpdf.pipeline.segment.Box
+import com.example.hinglishpdf.pipeline.segment.TableCellRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

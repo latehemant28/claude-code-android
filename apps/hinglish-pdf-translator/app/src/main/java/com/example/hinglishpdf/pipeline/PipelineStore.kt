@@ -12,6 +12,7 @@ import com.example.hinglishpdf.pipeline.segment.ParsedSegment
 import com.example.hinglishpdf.pipeline.segment.PlaceholderTag
 import com.example.hinglishpdf.pipeline.segment.SourcePart
 import com.example.hinglishpdf.pipeline.segment.SourceRef
+import com.example.hinglishpdf.pipeline.segment.TableCellRef
 import com.example.hinglishpdf.pipeline.segment.TextStyle
 import com.google.gson.Gson
 import com.google.gson.JsonArray
@@ -89,8 +90,9 @@ class PipelineStore(private val dao: PipelineDao) {
                 marker = layout?.get("marker")?.asString,
                 parts = layout?.get("parts")?.asJsonArray?.map { e ->
                     val o = e.asJsonObject
-                    SourcePart(o["index"].asInt, refFromJson(o["ref"].toString()), o["start"].asInt, o["idOffset"].asInt)
-                } ?: listOfNotNull(layout?.get("source")?.asInt?.let { SourcePart(it, ref, 0, 0) }),
+                    SourcePart(o["index"].asInt, refFromJson(o["ref"].toString()), o["start"].asInt, o["idOffset"].asInt, o["end"]?.asInt ?: -1)
+                } ?: listOfNotNull(layout?.get("source")?.asInt?.let { SourcePart(it, ref, 0, 0, row.text.length) }),
+                cell = layout?.get("cell")?.asJsonArray?.map { it.asInt }?.let { TableCellRef(it[0], it[1], it[2]) },
             )
         }
         val segments = dao.segments(bookId).map { row ->
@@ -124,9 +126,12 @@ class PipelineStore(private val dao: PipelineDao) {
          * outdated. 2: page furniture, columns by region, font tiers,
          * paragraphs joined across pages, columns and files. 3: stage 1
          * layout (X-Y cut reading order, weighted block classification,
-         * tables and figures read where they stand, footnotes last).
+         * tables and figures read where they stand, footnotes last). 4:
+         * stage 2 logical document (source spans with character ranges,
+         * table cells with row and column, joins only into a non-capital
+         * start in the same font tier).
          */
-        const val PARSER_VERSION = 3
+        const val PARSER_VERSION = 4
 
         private val gson = Gson()
         private val tagsType = object : TypeToken<List<PlaceholderTag>>() {}.type
@@ -143,6 +148,7 @@ class PipelineStore(private val dao: PipelineDao) {
             if (p.tier != 0) o.addProperty("tier", p.tier)
             if (p.column != 0) o.addProperty("column", p.column)
             p.marker?.let { o.addProperty("marker", it) }
+            p.cell?.let { c -> o.add("cell", JsonArray().apply { add(c.table); add(c.row); add(c.column) }) }
             when {
                 p.parts.size > 1 -> o.add(
                     "parts",
@@ -154,6 +160,7 @@ class PipelineStore(private val dao: PipelineDao) {
                                     add("ref", JsonParser.parseString(refToJson(part.ref)))
                                     addProperty("start", part.start)
                                     addProperty("idOffset", part.idOffset)
+                                    addProperty("end", part.end)
                                 },
                             )
                         }

@@ -385,13 +385,21 @@ segmentation and paragraph-based translation are in place
   in the tests with the ICDAR 2013 method of Clausner et al.
   ([`ReadingOrderMetric.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/layout/ReadingOrderMetric.kt):
   pairwise relations, the paper's penalty matrix, s = 1 / (e / e50 + 1)).
-- **Document assembly** ([`DocumentAssembler.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/DocumentAssembler.kt)):
-  one text stream for the whole book. A paragraph cut by a page, column or
-  EPUB file break is joined back when the first half lacks terminal
-  punctuation and the second is running text in the body font tier (never
-  a heading or a new list item); footnotes, figures, captions, tables and
-  furniture in between are skipped over. Each paragraph records its source
-  parts (its page span) to be split back at the nearest sentence.
+- **Stage 2: logical document** ([`DocumentAssembler.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/DocumentAssembler.kt),
+  [`LogicalDocument.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/logical/LogicalDocument.kt)):
+  one stream of typed elements for the whole book, independent of pages and
+  spine files: paragraphs, headings, lists (items holding nested lists),
+  tables (rows of cells, from the PDF layout or the EPUB markup), captions,
+  footnotes, TOC entries. Furniture is set apart and never breaks the
+  stream. A paragraph cut by a page, column or spine-file break is joined
+  with one space when the first part lacks terminal punctuation and the
+  next is body text in the same font tier that does not start with a
+  capital (lower case, a digit, or a script without capitals; leading
+  quotes are looked past). Footnotes, figures, captions and tables in
+  between are skipped over. Every element records its source spans:
+  (page, box, character range) for PDF, (spine file, XPath, character
+  range) for EPUB; cutting its text at the spans gives the source pieces
+  back.
 - **Hyphenation** ([`Hyphenation.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/Hyphenation.kt)):
   no dictionary is bundled. "contrap-" + "tions" joins when the book writes
   "contraptions" anywhere, or when the continuation is lower case and not a

@@ -76,11 +76,18 @@ data class LineBox(val range: IntRange, val page: Int, val box: Box)
  * One of the source paragraphs an assembled paragraph was joined from.
  *
  * @param index the source paragraph's position in the parser's output.
- * @param ref where it is.
+ * @param ref where it is (PDF: page and the box of its lines; EPUB: file and XPath).
  * @param start where its text begins in the assembled text.
  * @param idOffset what was added to its placeholder ids to keep them unique.
+ * @param end where its text ends in the assembled text; -1: at the end.
  */
-data class SourcePart(val index: Int, val ref: SourceRef, val start: Int, val idOffset: Int)
+data class SourcePart(val index: Int, val ref: SourceRef, val start: Int, val idOffset: Int, val end: Int = -1)
+
+/** A stretch of a paragraph's text and where it came from: (page, box, chars) or (file, XPath, chars). */
+data class SourceSpan(val ref: SourceRef, val start: Int, val end: Int)
+
+/** A table cell's place: the table (numbered per page or file), its row and column, 0-based. */
+data class TableCellRef(val table: Int, val row: Int, val column: Int)
 
 /**
  * One paragraph: its placeholder text, the tags those placeholders stand
@@ -97,6 +104,7 @@ data class SourcePart(val index: Int, val ref: SourceRef, val start: Int, val id
  * @param parts set by DocumentAssembler: the source paragraph(s) this one
  *   is made of, in order. More than one when a paragraph ran on across a
  *   page, column or file break; empty before assembly.
+ * @param cell for a table cell: its table, row and column.
  */
 data class ParsedParagraph(
     val role: ParagraphRole,
@@ -110,7 +118,16 @@ data class ParsedParagraph(
     val column: Int = 0,
     val marker: String? = null,
     val parts: List<SourcePart> = emptyList(),
+    val cell: TableCellRef? = null,
 ) {
+    /**
+     * Where each stretch of the text came from: one span, or several when
+     * the paragraph runs across a page, column or file break. Cutting the
+     * text at the spans gives the source pieces back.
+     */
+    val spans: List<SourceSpan>
+        get() = parts.ifEmpty { listOf(SourcePart(0, ref, 0, 0)) }.map { SourceSpan(it.ref, it.start, if (it.end < 0) text.length else it.end) }
+
     /**
      * Text with letters in it; numbers, symbols and marks alone are kept as
      * they are, never sent for translation. Furniture never is.
