@@ -13,10 +13,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.hinglishpdf.ui.TranslatorScreen
 import com.example.hinglishpdf.ui.TranslatorViewModel
 import com.example.hinglishpdf.ui.onboarding.OnboardingScreen
+import com.example.hinglishpdf.ui.reader.BookReaderScreen
+import com.example.hinglishpdf.ui.reader.ReaderDocument
 import com.example.hinglishpdf.ui.theme.HinglishPdfTheme
+
+/** The app's three screens. */
+private sealed interface Screen {
+    data object Onboarding : Screen
+    data object Main : Screen
+    data class Reader(val document: ReaderDocument) : Screen
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -31,15 +41,31 @@ class MainActivity : ComponentActivity() {
                 // The tutorial appears by itself only on the very first launch (recorded at
                 // once); kept across rotation, and replayable from the menu.
                 var onboarding by rememberSaveable { mutableStateOf(preferences.takeFirstLaunch()) }
+                val reading by viewModel.reader.collectAsStateWithLifecycle()
+                val dark by viewModel.readerDark.collectAsStateWithLifecycle()
+                val scale by viewModel.readerScale.collectAsStateWithLifecycle()
+                val screen = when {
+                    onboarding -> Screen.Onboarding
+                    reading != null -> Screen.Reader(reading!!)
+                    else -> Screen.Main
+                }
                 AnimatedContent(
-                    targetState = onboarding,
+                    targetState = screen,
+                    contentKey = { it::class },
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "onboarding",
-                ) { showing ->
-                    if (showing) {
-                        OnboardingScreen(onFinish = { onboarding = false })
-                    } else {
-                        TranslatorScreen(viewModel, onShowTutorial = { onboarding = true })
+                    label = "screen",
+                ) { target ->
+                    when (target) {
+                        Screen.Onboarding -> OnboardingScreen(onFinish = { onboarding = false })
+                        Screen.Main -> TranslatorScreen(viewModel, onShowTutorial = { onboarding = true })
+                        is Screen.Reader -> BookReaderScreen(
+                            document = target.document,
+                            dark = dark,
+                            scale = scale,
+                            onDark = viewModel::setReaderDark,
+                            onScale = viewModel::setReaderScale,
+                            onClose = viewModel::closeReader,
+                        )
                     }
                 }
             }

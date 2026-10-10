@@ -173,7 +173,7 @@ class TranslationService : Service() {
             showProgress(book, saving, book.pageCount, book.pageCount)
             val saved = app.exporter.exportToDownloads(book, format)
             books.setStatus(id, BookStatus.COMPLETED)
-            Notifications.finished(this, book.title, saved.displayName, saved.uri, format.mimeType)
+            Notifications.finished(this, book.title, saved.displayName)
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 // Paused by the user: wait for a manual resume. Otherwise (the

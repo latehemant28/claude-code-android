@@ -64,6 +64,27 @@ class AppPreferences(context: Context) {
         return true
     }
 
+    private val _readerDark = MutableStateFlow(prefs.getBoolean(READER_DARK, false))
+
+    /** In-app reader: dark pages. */
+    val readerDark: StateFlow<Boolean> = _readerDark.asStateFlow()
+
+    private val _readerScale = MutableStateFlow(prefs.getFloat(READER_SCALE, 1f).coerceIn(READER_SCALE_MIN, READER_SCALE_MAX))
+
+    /** In-app reader: text size (EPUB) or zoom (PDF), 1 = normal. */
+    val readerScale: StateFlow<Float> = _readerScale.asStateFlow()
+
+    fun setReaderDark(dark: Boolean) {
+        prefs.edit().putBoolean(READER_DARK, dark).apply()
+        _readerDark.value = dark
+    }
+
+    fun setReaderScale(scale: Float) {
+        val value = scale.coerceIn(READER_SCALE_MIN, READER_SCALE_MAX)
+        prefs.edit().putFloat(READER_SCALE, value).apply()
+        _readerScale.value = value
+    }
+
     private val _termsAcceptedAt = MutableStateFlow(
         prefs.getLong(TERMS_ACCEPTED_AT, 0L).takeIf { prefs.getInt(TERMS_VERSION, 0) >= CURRENT_TERMS_VERSION && it > 0 },
     )
@@ -78,15 +99,19 @@ class AppPreferences(context: Context) {
         _termsAcceptedAt.value = now
     }
 
-    private companion object {
-        const val OUTPUT_FORMAT = "output_format"
-        const val SOURCE_LANGUAGE = "source_language"
-        const val TARGET_LANGUAGE = "target_language"
-        const val ONBOARDING_SHOWN = "onboarding_shown"
-        const val TERMS_ACCEPTED_AT = "terms_accepted_at"
-        const val TERMS_VERSION = "terms_version"
+    companion object {
+        const val READER_SCALE_MIN = 0.8f
+        const val READER_SCALE_MAX = 2f
+        private const val OUTPUT_FORMAT = "output_format"
+        private const val SOURCE_LANGUAGE = "source_language"
+        private const val TARGET_LANGUAGE = "target_language"
+        private const val ONBOARDING_SHOWN = "onboarding_shown"
+        private const val READER_DARK = "reader_dark"
+        private const val READER_SCALE = "reader_scale"
+        private const val TERMS_ACCEPTED_AT = "terms_accepted_at"
+        private const val TERMS_VERSION = "terms_version"
 
         /** Raise when the Terms text changes, so everyone is asked again. */
-        const val CURRENT_TERMS_VERSION = 1
+        private const val CURRENT_TERMS_VERSION = 1
     }
 }

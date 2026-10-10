@@ -81,10 +81,11 @@ private fun LanguageDropdown(
     var expanded by rememberSaveable { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }, modifier = modifier) {
         OutlinedTextField(
-            value = selected.englishName,
+            value = selected.shortName,
             onValueChange = {},
             readOnly = true,
             singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium,
             label = { Text(label) },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),

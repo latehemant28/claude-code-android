@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.hinglishpdf.MainActivity
@@ -54,16 +53,14 @@ object Notifications {
 
     fun update(context: Context, notification: Notification) = post(context, PROGRESS_ID, notification)
 
-    fun finished(context: Context, title: String, fileName: String, uri: Uri, mimeType: String) {
-        val open = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, mimeType)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    /** Tapping it opens the app, where the book waits with "Read Now". */
+    fun finished(context: Context, title: String, fileName: String) {
         val notification = NotificationCompat.Builder(context, CHANNEL_RESULT)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("$title is translated")
-            .setContentText("Saved to Downloads: $fileName")
+            .setContentText("Tap to read it in the app · saved to Downloads: $fileName")
             .setAutoCancel(true)
-            .setContentIntent(PendingIntent.getActivity(context, 2, open, PendingIntent.FLAG_IMMUTABLE))
+            .setContentIntent(openApp(context))
             .build()
         post(context, RESULT_ID, notification)
     }

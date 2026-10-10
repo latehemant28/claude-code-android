@@ -32,6 +32,11 @@ class OnboardingScreenTest {
 
     /** Screenshots for a human to look at (build/screenshots), not compared. */
     private fun screenshot(name: String) {
+        // Lottie loads its animation on a background thread: give it a moment to arrive.
+        repeat(15) {
+            Thread.sleep(50)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        }
         compose.waitForIdle()
         val view = compose.activity.window.decorView
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
@@ -63,6 +68,8 @@ class OnboardingScreenTest {
         assertFalse(compose.onAllNodesWithTextExists("Skip"))
         screenshot("onboarding-3")
 
+        // The last button looks like the others (solid white), just with its own label.
+        compose.onNodeWithText("Next").assertDoesNotExist()
         assertEquals(0, finished)
         compose.onNodeWithText(OnboardingText.START).performClick()
         assertEquals(1, finished)

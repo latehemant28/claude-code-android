@@ -24,6 +24,12 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
   paragraph breaks are restored after translation.
 - **Model fallback:** a prioritized list of models per provider; a retired,
   out-of-quota or rate-limited model is swapped for the next one automatically.
+- **Clean main screen:** a one-line AI status banner, From / To, Output
+  Format and, right below, the big **Translate a book** card; provider, key
+  and model live in a settings sheet.
+- **In-app reader:** **Read Now** on a finished book opens it inside the app
+  (PDF pages with `PdfRenderer`, EPUB chapters in a local WebView) with dark
+  mode and text size / zoom.
 - **Reading UI:** Devanagari fonts from Google Fonts (Mukta, Noto Serif
   Devanagari, Kalam) and an **Aa** sheet for font style and text size.
 - **Background and crash-proof:** a foreground service with a "Translating
@@ -31,7 +37,7 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
   is done, and a restart resumes at the first untranslated page.
 - **Terms of Use:** a disclaimer that must be accepted before the first
   translation, and always available from the ⋮ menu.
-- **Small:** ~6.9 MB APK, including the embedded Noto fonts.
+- **Small:** ~7.7 MB APK, including the embedded Noto fonts and Lottie.
 
 Tech: Kotlin, Jetpack Compose (Material 3, downloadable Google Fonts), the
 providers' HTTPS streaming APIs (HttpURLConnection + Gson, no provider SDK),
@@ -44,11 +50,14 @@ Android's `PdfDocument` for writing PDFs, and `java.util.zip` for EPUBs.
 
 ## Setup: pick a provider and add its API key
 
-At the top of the screen:
+The banner at the top of the main screen shows the AI engine in use
+("🤖 Using: Groq"), or, with no key saved, a highlighted **⚠️ API Key
+Required - Tap to Configure**. Tapping it (or ⋮ → **AI provider & API key**,
+or **Select PDF / EPUB** without a key) opens the settings sheet:
 
 1. **AI provider** dropdown: Google Gemini, OpenAI, Anthropic Claude or Groq.
 2. **Get API Key** opens that provider's official key dashboard in an in-app
-   browser:
+   browser (a full-screen WebView; the user never leaves the app):
 
    | Provider | Key page | Cost |
    |---|---|---|
@@ -57,20 +66,21 @@ At the top of the screen:
    | Anthropic Claude | https://console.anthropic.com/settings/keys | Paid per use |
    | Groq | https://console.groq.com/keys | Free tier (small limits) |
 
-   Sign in, create a key, tap the site's **Copy** button, and close the
-   browser (✕). If the clipboard holds something that looks like a key, it is
-   pasted into the key field; check it and tap **Save key**. The paste button
-   in the field does the same by hand.
-3. **Model (optional):** leave empty to use the provider's defaults in order,
-   or type a model name to try first.
+   Sign in, create a key and tap the site's **Copy** button: an **API key
+   copied ✓ · Use this key** bar appears; tapping it (or closing the browser)
+   puts the key in the key field. Check it and tap **Save key**. The paste
+   button in the field does the same by hand.
+3. **Advanced Settings** (folded away by default): **Model (optional)**;
+   leave empty to use the provider's defaults in order, or type a model name
+   to try first.
 
 Keys are kept per provider, only on the phone (app-private storage, excluded
 from backups), never in code or git.
 
 **Google sign-in inside apps:** Google blocks some sign-ins in embedded
-browsers ("This browser or app may not be secure"). If that happens, tap the
-open-in-browser button in the in-app browser's top bar, copy the key in
-Chrome, come back and use the paste button.
+browsers ("This browser or app may not be secure"). Only for that case, the
+in-app browser's ⋮ menu has **Sign-in blocked? Open in browser**; copy the
+key there, come back and use the paste button.
 
 ### Gemini key at build time (optional)
 
@@ -142,7 +152,7 @@ cd apps/hinglish-pdf-translator
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~6.9 MB); sign
+`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~7.7 MB); sign
 it with your own key before installing.
 
 ## How it works
@@ -217,19 +227,42 @@ English otherwise.
 is a three-slide Compose `HorizontalPager` on the icon's deep-purple
 gradient, with the specified titles and texts:
 
-| Slide | Title | Visual (animated, drawn in Compose) |
+| Slide | Title | Visual (looping Lottie animation) |
 |---|---|---|
-| 1 | Your Rules, Your Language | The app's PDF → अ artwork floating and tilting in 3D, with letters from ten scripts orbiting around it |
-| 2 | Choose Your AI Engine | A processor chip wired to Gemini, OpenAI, Claude and Groq; a pulse runs to each "engine" in turn |
-| 3 | Recommended AI Providers | A glowing "recommended" badge; the three recommendations as cards, the "Don't worry..." note and the **Let's Get Started!** button |
+| 1 | Your Rules, Your Language | An open book flipping its pages while letters of seven scripts (A, अ, あ, ع, Ж, 中, அ) burst out of it |
+| 2 | Choose Your AI Engine | A glowing AI chip whose circuit traces send a pulse to each of four "engines" in turn |
+| 3 | Recommended AI Providers | A pulsing gold "recommended" badge with a rotating ring and twinkling sparkles; the three recommendations as cards, the "Don't worry..." note and the **Let's Get Started!** button |
 
 Next / page dots / Skip move through it; **Let's Get Started!** opens the
 main screen. A flag in SharedPreferences is written the moment the tutorial
 first appears, so it shows by itself only on the very first launch (also for
 people updating from an older version, once). It can be replayed from the ⋮
-menu → **Show the tutorial**, and ⋮ → **AI provider & API key** jumps to the
-provider card. The visuals are drawn and animated in Compose instead of a
-Lottie file: no extra library and no third-party animation to license.
+menu → **Show the tutorial**. Every slide uses the same solid white button
+("Next", then "Let's Get Started!"), and **Skip** is large and bold with a
+48 dp touch target.
+
+The three animations (`res/raw/onboarding_*.json`, 4-second loops, 84 KB in
+all) are generated by [`tools/onboarding_lottie.py`](tools/onboarding_lottie.py):
+shapes, gradients and trim-path pulses written as Lottie JSON from code, with
+the letters taken as vector outlines from the Noto fonts (SIL Open Font
+License). No images and no third-party animation files; a unit test renders
+frames of each to check they parse and draw.
+
+### In-app reader
+
+A finished book shows **Read Now** next to **Save to Downloads**. It writes a
+private reading copy in the selected output format (app cache, replaced each
+time) and opens [`BookReaderScreen`](app/src/main/java/com/example/hinglishpdf/ui/reader/BookReaderScreen.kt):
+
+- **PDF:** pages rendered with Android's `PdfRenderer`, scrolled vertically.
+- **EPUB:** chapters in reading order in a local WebView with Previous / Next.
+  Files are served straight from the EPUB (`https://book.local/...`), with
+  scripts, file access and network access off; links never leave the app.
+- **Controls:** a dark mode toggle (PDF pages are inverted, EPUB text gets a
+  dark stylesheet) and an **Aa** panel with a text size (EPUB) or zoom (PDF)
+  slider. Both are remembered.
+
+The "finished" notification also opens the app instead of an external viewer.
 
 ### Reading UI
 
@@ -363,9 +396,11 @@ app/
         │   ├── document/                 Import, blocks, PDF export (PdfExporter, PdfPaginator, BundledFonts)
         │   ├── export/BookExporter.kt    Writes the result to Downloads via MediaStore
         │   └── translate/BlockChunker.kt Page → chunks of whole blocks
-        └── ui/                           Compose screen + ViewModel, language and provider cards,
-                                          in-app key browser, Terms dialog; onboarding/ = tutorial;
-                                          reader/ = fonts + Aa sheet
+        └── ui/                           Compose screen + ViewModel, language card, status banner +
+                                          provider settings sheet, in-app key browser, Terms dialog;
+                                          onboarding/ = tutorial (Lottie); reader/ = in-app reader,
+                                          fonts + Aa sheet
+tools/onboarding_lottie.py              Generates res/raw/onboarding_*.json
 ```
 
 ## Limitations
@@ -374,10 +409,12 @@ app/
   requests and errors against a local server, fallback, prompt, parser,
   chunking, pagination, EPUB output validated with EPUBCheck, Room resume and
   the version 1 → 2 migration, the tutorial and language pickers rendered with
-  Robolectric) and
+  Robolectric, the dashboard with the real ViewModel, the EPUB reader, the
+  Lottie animations rendered frame by frame) and
   live requests to all four providers' real endpoints (each correctly
   rejected a dummy key) pass. A real translation with a valid key, the in-app
-  browser and the PDF rendering still need to be tried on a device.
+  browser, PDF export and the PDF reader (Robolectric cannot run Android's PDF
+  classes) still need to be tried on a device.
 - **Google sign-in in the in-app browser** may be refused by Google; use the
   open-in-browser button then (see Setup).
 - **Model names change.** If every default model of a provider is retired,

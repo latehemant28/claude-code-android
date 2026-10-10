@@ -44,6 +44,9 @@ enum class Language(
     THAI("Thai", "ไทย", "th"),
     ;
 
+    /** Short enough for the narrow From / To fields ("Chinese" rather than "Chinese (Simplified)"). */
+    val shortName: String get() = englishName.substringBefore(" (")
+
     /** "Hindi · हिन्दी" for the dropdowns. */
     val label: String get() = if (nativeName == null) englishName else "$englishName · $nativeName"
 

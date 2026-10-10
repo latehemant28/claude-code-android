@@ -7,6 +7,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.example.hinglishpdf.data.db.AppDatabase
 import com.example.hinglishpdf.data.db.BookEntity
+import com.example.hinglishpdf.data.db.PageEntity
 import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.ExportLabels
@@ -44,41 +45,56 @@ class BookExporter(
 
     suspend fun exportToDownloads(book: BookEntity, format: DocFormat): Saved = withContext(Dispatchers.IO) {
         val pages = db.pageDao().pages(book.id)
-        val language = book.toLanguage
-        val name = "${book.title} (${language.englishName}).${format.extension}"
-        val uri = saveToDownloads(name, format.mimeType) { out ->
-            when {
-                format == DocFormat.PDF ->
-                    PdfExporter(fonts, language).write(out, pages, sourceIsPdf = book.format == DocFormat.PDF)
-                book.format == DocFormat.EPUB -> EpubBook.writeTranslated(
-                    File(book.sourcePath),
-                    out,
-                    pages.flatMap { p -> p.translations ?: List(p.sourceBlocks.size) { null } },
-                    language = language.code,
-                    rightToLeft = language.rightToLeft,
-                )
-                else -> EpubWriter.write(
-                    out,
-                    title = book.title,
-                    sections = pages.map { page ->
-                        EpubWriter.Section(
-                            page.pageNumber,
-                            page.sourceBlocks.mapIndexedNotNull { i, block ->
-                                val text = page.translations?.getOrNull(i) ?: block.text
-                                if (text.isBlank()) null else block to text
-                            },
-                        )
-                    },
-                    pageMarkers = true,
-                    fonts = if (language.devanagari) fonts.epubFonts() else emptyMap(),
-                    language = language.code,
-                    rightToLeft = language.rightToLeft,
-                    labels = ExportLabels.forLanguage(language),
-                )
-            }
-        }
+        val name = "${book.title} (${book.toLanguage.englishName}).${format.extension}"
+        val uri = saveToDownloads(name, format.mimeType) { out -> write(book, format, pages, out) }
         db.bookDao().setOutput(book.id, uri.toString(), name)
         Saved(uri, name, format)
+    }
+
+    /**
+     * The same file, written to the app's private cache for the in-app
+     * reader ("Read Now"). Earlier reading copies are removed first.
+     */
+    suspend fun exportForReading(book: BookEntity, format: DocFormat): File = withContext(Dispatchers.IO) {
+        val dir = File(context.cacheDir, "reader").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val pages = db.pageDao().pages(book.id)
+        val file = File(dir, "book-${book.id}.${format.extension}")
+        file.outputStream().use { write(book, format, pages, it) }
+        file
+    }
+
+    private fun write(book: BookEntity, format: DocFormat, pages: List<PageEntity>, out: OutputStream) {
+        val language = book.toLanguage
+        when {
+            format == DocFormat.PDF ->
+                PdfExporter(fonts, language).write(out, pages, sourceIsPdf = book.format == DocFormat.PDF)
+            book.format == DocFormat.EPUB -> EpubBook.writeTranslated(
+                File(book.sourcePath),
+                out,
+                pages.flatMap { p -> p.translations ?: List(p.sourceBlocks.size) { null } },
+                language = language.code,
+                rightToLeft = language.rightToLeft,
+            )
+            else -> EpubWriter.write(
+                out,
+                title = book.title,
+                sections = pages.map { page ->
+                    EpubWriter.Section(
+                        page.pageNumber,
+                        page.sourceBlocks.mapIndexedNotNull { i, block ->
+                            val text = page.translations?.getOrNull(i) ?: block.text
+                            if (text.isBlank()) null else block to text
+                        },
+                    )
+                },
+                pageMarkers = true,
+                fonts = if (language.devanagari) fonts.epubFonts() else emptyMap(),
+                language = language.code,
+                rightToLeft = language.rightToLeft,
+                labels = ExportLabels.forLanguage(language),
+            )
+        }
     }
 
     /**

@@ -15,6 +15,7 @@ import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.llm.Language
 import com.example.hinglishpdf.data.settings.ProviderSettings
+import com.example.hinglishpdf.ui.reader.ReaderDocument
 import com.example.hinglishpdf.ui.reader.ReaderFont
 import com.example.hinglishpdf.ui.reader.ReaderStyle
 import com.example.hinglishpdf.service.LiveStatus
@@ -25,6 +26,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
@@ -53,6 +55,8 @@ data class TranslatorUiState(
     val selectedBookId: Long? = null,
     val live: LiveStatus = LiveStatus(),
     val importing: Boolean = false,
+    /** The book whose reading copy is being prepared ("Read Now"). */
+    val openingBookId: Long? = null,
     /** One-shot message for a snackbar. */
     val message: String? = null,
 ) {
@@ -106,6 +110,7 @@ data class LivePage(
 private data class LocalState(
     val selectedBookId: Long? = null,
     val importing: Boolean = false,
+    val openingBookId: Long? = null,
     val message: String? = null,
 )
 
@@ -141,6 +146,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
             selectedBookId = l.selectedBookId,
             live = live,
             importing = l.importing,
+            openingBookId = l.openingBookId,
             message = l.message,
         )
     }.stateIn(
@@ -200,6 +206,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     /** Stores a pasted key on this phone, for [provider] only. */
     fun saveApiKey(provider: AIProvider, key: String) {
         app.providers.saveKey(provider, key)
+        _providerSheet.value = false
         showMessage("${provider.displayName} API key saved on this phone")
     }
 
@@ -282,6 +289,49 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
             }
             showMessage(message)
         }
+    }
+
+    private val _reader = MutableStateFlow<ReaderDocument?>(null)
+
+    /** The book open in the in-app reader, if any (survives rotation with the ViewModel). */
+    val reader: StateFlow<ReaderDocument?> = _reader.asStateFlow()
+
+    val readerDark: StateFlow<Boolean> = app.preferences.readerDark
+    val readerScale: StateFlow<Float> = app.preferences.readerScale
+
+    fun setReaderDark(dark: Boolean) = app.preferences.setReaderDark(dark)
+
+    fun setReaderScale(scale: Float) = app.preferences.setReaderScale(scale)
+
+    /** "Read Now": writes a private copy in the chosen output format and opens it in the reader. */
+    fun readNow(book: BookEntity) {
+        if (local.value.openingBookId != null) return
+        val format = state.value.outputFormat
+        local.update { it.copy(openingBookId = book.id) }
+        viewModelScope.launch {
+            try {
+                val file = app.exporter.exportForReading(book, format)
+                _reader.value = ReaderDocument(book.id, book.title, file, format)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                showMessage("Could not open the book: ${e.message}")
+            } finally {
+                local.update { it.copy(openingBookId = null) }
+            }
+        }
+    }
+
+    fun closeReader() {
+        _reader.value = null
+    }
+
+    /** The "AI provider & API key" sheet (status banner, menu, or Translate without a key). */
+    private val _providerSheet = MutableStateFlow(false)
+    val providerSheet: StateFlow<Boolean> = _providerSheet.asStateFlow()
+
+    fun showProviderSheet(show: Boolean) {
+        _providerSheet.value = show
     }
 
     fun delete(book: BookEntity) {

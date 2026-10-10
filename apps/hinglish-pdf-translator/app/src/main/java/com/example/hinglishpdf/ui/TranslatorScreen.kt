@@ -1,8 +1,6 @@
 package com.example.hinglishpdf.ui
 
 import android.Manifest
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,13 +25,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
@@ -59,7 +56,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.text.TextStyle
@@ -72,8 +68,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -92,7 +86,6 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.bulletFor
-import com.example.hinglishpdf.data.ai.AIProvider
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,10 +100,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
     var showTerms by rememberSaveable { mutableStateOf(false) }
     /** Runs once the Terms are accepted (the translation the user was starting). */
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var browserFor by rememberSaveable { mutableStateOf<AIProvider?>(null) }
-    var pastedKey by remember { mutableStateOf<String?>(null) }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    val providerSheet by viewModel.providerSheet.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -159,14 +149,17 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
         )
     }
 
-    browserFor?.let { provider ->
-        ApiKeyBrowser(provider) { copied ->
-            browserFor = null
-            if (copied != null && !state.providers.configured) {
-                pastedKey = copied
-                viewModel.showMessage("Pasted the key you copied. Check it, then tap Save key.")
-            }
-        }
+    if (providerSheet) {
+        ProviderSettingsSheet(
+            settings = state.providers,
+            activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
+            busy = state.live.running,
+            onDismiss = { viewModel.showProviderSheet(false) },
+            onSelect = viewModel::selectProvider,
+            onSaveKey = viewModel::saveApiKey,
+            onRemoveKey = viewModel::removeApiKey,
+            onSetModel = viewModel::setModel,
+        )
     }
 
     if (showTextSettings) {
@@ -198,7 +191,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
                                     text = { Text("AI provider & API key") },
                                     onClick = {
                                         showMenu = false
-                                        scope.launch { listState.animateScrollToItem(PROVIDER_ITEM) }
+                                        viewModel.showProviderSheet(true)
                                     },
                                 )
                                 DropdownMenuItem(
@@ -221,12 +214,20 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
             LazyColumn(
-                state = listState,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // Keep the order: PROVIDER_ITEM is the provider card's index (menu → scroll).
+                // Progressive disclosure: one compact line for the AI engine; its
+                // settings (provider, key, model) live in a sheet.
+                item(key = "status") {
+                    ApiStatusBanner(
+                        settings = state.providers,
+                        activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
+                        onClick = { viewModel.showProviderSheet(true) },
+                    )
+                }
+
                 item(key = "languages") {
                     LanguageCard(
                         source = state.sourceLanguage,
@@ -241,30 +242,21 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
                     OutputFormatSelector(state.outputFormat, onSelect = viewModel::setOutputFormat)
                 }
 
-                item(key = "provider") {
-                    ProviderCard(
-                        settings = state.providers,
-                        activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
-                        busy = state.live.running,
-                        pastedKey = pastedKey,
-                        onPastedKeyShown = { pastedKey = null },
-                        onSelect = viewModel::selectProvider,
-                        onGetKey = { browserFor = it },
-                        onSaveKey = viewModel::saveApiKey,
-                        onRemoveKey = viewModel::removeApiKey,
-                        onSetModel = viewModel::setModel,
-                    )
-                }
-
+                // The main action, right below the output format.
                 item(key = "new") {
                     NewBookCard(
                         target = state.targetLanguage.englishName,
-                        enabled = state.canAddBook,
+                        enabled = state.languagesValid && !state.importing,
                         importing = state.importing,
                         onPick = {
-                            withTerms {
-                                // Some file managers label EPUBs as generic binaries.
-                                bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+                            if (!state.configured) {
+                                viewModel.showProviderSheet(true)
+                                viewModel.showMessage("Add an API key first")
+                            } else {
+                                withTerms {
+                                    // Some file managers label EPUBs as generic binaries.
+                                    bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+                                }
                             }
                         },
                         onShowTerms = { afterTerms = null; showTerms = true },
@@ -286,19 +278,8 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
                             onResume = { withTerms { viewModel.resume(entry.book) } },
                             saveFormat = state.outputFormat,
                             onSave = { viewModel.saveToDownloads(entry.book) },
-                            onOpen = {
-                                val uri = entry.book.outputUri ?: return@BookCard
-                                val format = DocFormat.ofFileName(entry.book.outputName) ?: entry.book.format
-                                try {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW)
-                                            .setDataAndType(Uri.parse(uri), format.mimeType)
-                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                    )
-                                } catch (e: Exception) {
-                                    viewModel.showMessage("No app found to open ${entry.book.outputName}")
-                                }
-                            },
+                            opening = state.openingBookId == entry.book.id,
+                            onRead = { viewModel.readNow(entry.book) },
                             onCopy = {
                                 val message = try {
                                     clipboard.setText(AnnotatedString(viewModel.plainText()))
@@ -344,19 +325,33 @@ private fun NewBookCard(
     onPick: () -> Unit,
     onShowTerms: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Translate a book into $target", style = MaterialTheme.typography.titleSmall)
-            Button(onClick = onPick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+    // The focal point of the screen: highlighted card, large button.
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Translate a book into $target",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Button(
+                onClick = onPick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) {
                 Icon(Icons.Filled.UploadFile, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (importing) "Opening…" else "Select PDF / EPUB")
+                Spacer(Modifier.width(10.dp))
+                Text(if (importing) "Opening…" else "Select PDF / EPUB", style = MaterialTheme.typography.titleMedium)
             }
             Text(
                 "Runs in the background, page by page. You can lock the phone; every page is saved " +
                     "as soon as it is done and translation resumes after a crash or restart.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 "For personal use, with documents you have the rights to. Terms of Use",
@@ -407,7 +402,8 @@ private fun BookCard(
     onResume: () -> Unit,
     saveFormat: DocFormat,
     onSave: () -> Unit,
-    onOpen: () -> Unit,
+    opening: Boolean,
+    onRead: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -452,7 +448,7 @@ private fun BookCard(
             } else if (running) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            if (selected) {
+            if (selected || book.status == BookStatus.COMPLETED) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     when {
                         running -> OutlinedButton(onClick = onPause) {
@@ -466,6 +462,14 @@ private fun BookCard(
                             Text("Resume")
                         }
                     }
+                    if (book.status == BookStatus.COMPLETED) {
+                        // The main thing to do with a finished book: read it here, in the app.
+                        Button(onClick = onRead, enabled = !opening) {
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (opening) "Opening…" else "Read Now")
+                        }
+                    }
                     if (entry.translatedPages > 0) {
                         FilledTonalButton(onClick = onSave) {
                             Icon(Icons.Filled.Save, contentDescription = null)
@@ -473,9 +477,6 @@ private fun BookCard(
                             Text("Save ${saveFormat.name} to Downloads")
                         }
                         IconButton(onClick = onCopy) { Icon(Icons.Filled.ContentCopy, contentDescription = "Copy text") }
-                    }
-                    if (book.outputUri != null) {
-                        IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open saved file") }
                     }
                     if (!running) {
                         IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete") }
@@ -598,6 +599,3 @@ private fun BlockView(block: DocBlock, text: String, previous: DocBlock?) {
         }
     }
 }
-
-/** Index of the provider card in the main list (languages, format, provider, ...). */
-private const val PROVIDER_ITEM = 2

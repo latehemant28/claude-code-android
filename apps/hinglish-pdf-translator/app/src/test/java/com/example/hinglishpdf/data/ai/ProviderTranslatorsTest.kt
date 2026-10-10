@@ -374,11 +374,10 @@ class ProviderTranslatorsTest {
 
     @Test
     fun `no connection is retried later`() {
-        val port = server.localPort
-        server.close()
-        val e = failure(OpenAITranslator("k", "m", endpoint = "http://127.0.0.1:$port/v1/chat/completions"))
+        // Port 1 is never open: the connection is refused at once. (Reusing a just-closed
+        // test port was flaky: another socket can take it in between.)
+        val e = failure(OpenAITranslator("k", "m", endpoint = "http://127.0.0.1:1/v1/chat/completions"))
         assertTrue(e is TranslatorException.Transient && e.message == "No internet connection")
-        start() // for @After
     }
 
     @Test

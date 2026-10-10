@@ -115,6 +115,9 @@ object EpubBook {
         }
     }
 
+    /** The chapter files in reading (spine) order, as paths inside the zip (for the in-app reader). */
+    fun chapterPaths(zip: ZipFile): List<String> = readSpine(zip).chapters
+
     // ---------------------------------------------------------------- spine
 
     private data class Spine(val title: String?, val chapters: List<String>, val opfPath: String)
