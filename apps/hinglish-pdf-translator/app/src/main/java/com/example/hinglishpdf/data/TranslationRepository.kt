@@ -148,6 +148,17 @@ class TranslationRepository(
             translateChunk(units.subList(half, units.size), events, streamTokens = false)
     }
 
+    /**
+     * One request whose prompt the caller built (the pipeline's paragraph
+     * chunks): the same provider, pacing and retries as a page. Returns the
+     * raw answer; tokens are emitted if [streamTokens].
+     */
+    suspend fun ask(prompt: String, events: FlowCollector<PageEvent>, streamTokens: Boolean): String =
+        request(prompt, events, streamTokens)
+
+    /** The pause the selected provider needs after each request. */
+    fun pauseMillis(): Long = chunkPauseMillis()
+
     /** One AI request: paced, streamed, retried on rate limits and network errors. */
     private suspend fun request(prompt: String, events: FlowCollector<PageEvent>, streamTokens: Boolean): String {
         var attempt = 0

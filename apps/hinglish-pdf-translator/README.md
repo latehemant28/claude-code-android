@@ -186,8 +186,16 @@ it with your own key before installing.
 ```
 Select PDF/EPUB ─► BookImporter.copyIn ─► Room: book (QUEUED) ─► TranslationService
                                                                    │
-  1. Extract pages once (PDFBox + PdfLayoutAnalyzer) ─► Room: pages │ (one transaction)
-  2. loop: page = first page with translations IS NULL              │
+  0. Parse once: PdfLayout / EpubParser ─► DocumentAssembler        │
+     ─► Segmenter ─► Room: parsed_documents, paragraphs, segments   │
+  1. Pages once ─► Room: pages (one transaction)                    │
+     books since 4.4: real PDF pages / EPUB sections built from the │
+     assembled paragraphs (PipelinePages); older books: as below    │
+  2. books since 4.4: ParagraphChunker → 1-3 whole paragraphs per   │
+     request, structure markers {P} {LI} {H1} {COL}…, answer matched│
+     back by marker, page saved once all its paragraphs are done    │
+     older books, page by page:                                     │
+     loop: page = first page with translations IS NULL              │
         TranslationRepository.translatePage(page):                  │
           BlockChunker: page → chunk(s) of whole blocks (≤800 words)│
           request = the chunk (system prompt = the prompt):          │
@@ -207,7 +215,11 @@ Select PDF/EPUB ─► BookImporter.copyIn ─► Room: book (QUEUED) ─► Tra
 is the specified context-aware Hindi prompt, word for word (a unit test checks
 it). The specified text stopped before closing its `<examples>` tag, so the
 closing `</examples>` line was added. Every provider receives it as its
-**system prompt**, and each request carries only the chunk of text.
+**system prompt**, and each request carries only the chunk of text. For
+books translated through the pipeline (4.4 and later) the request starts
+with the locked technical rules (copy placeholders and structure markers,
+keep numbers, add or skip nothing) followed by the blocks, one per line, each
+behind its marker; the system prompt is unchanged.
 Temperature is 0.2 (unless a model refuses one), and Gemini's safety filters
 are set to `BLOCK_NONE` so ordinary literature isn't refused mid-book.
 
@@ -318,47 +330,89 @@ under "Select PDF / EPUB".
 
 The app is being turned into a pipeline: Upload > Preflight > **Parser >
 Segmenter** > Analyzer > Prompt Builder > Translation Engine > Editor > QA >
-Rebuilder > Layout Verifier > Delivery. Phase 1 (parsing and segmentation,
-[`pipeline/`](app/src/main/java/com/example/hinglishpdf/pipeline)) is in
-place; translation still runs page by page as described above until the
-engine moves onto segments in Phase 2.
+Rebuilder > Layout Verifier > Delivery. Parsing, document assembly,
+segmentation and paragraph-based translation are in place
+([`pipeline/`](app/src/main/java/com/example/hinglishpdf/pipeline)).
 
+- **Configuration** ([`assets/pipeline-config.json`](app/src/main/assets/pipeline-config.json),
+  [`PipelineConfig.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/PipelineConfig.kt)):
+  every threshold and pattern (margin zones, repetition, running-head and
+  page-number patterns, boilerplate pages, captions, paragraph gap 1.3×,
+  indents, columns, tables, font tiers, terminal punctuation, standalone
+  words, request size) is a config value. A test keeps the file and the
+  built-in defaults equal.
 - **Placeholders** ([`Placeholders.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/Placeholders.kt),
   [`InlineCodec.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/InlineCodec.kt)):
   inline tags become `{1}text{/1}`, elements without text `[[IMG_3]]`,
   `[[BR_4]]`, protected ones (`<code>`, `translate="no"`) `[[CODE_5]]`;
-  text that merely looks like a placeholder is protected as `[[TXT_n]]`.
-  Each tag's markup is stored, decoding rebuilds the exact original nodes,
-  and a translation with missing, extra, reordered or badly nested
-  placeholders is refused.
+  text that merely looks like a placeholder or a structure marker is
+  protected as `[[TXT_n]]`. Each tag's markup is stored and decoding
+  rebuilds the exact original nodes.
 - **Sentence segmenter** ([`SentenceSegmenter.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/SentenceSegmenter.kt)):
   sentences with their paragraph as parent; no cut after abbreviations
   (Mr., e.g., Fig. 3), initials, decimals, inside quoted dialogue, before a
   lower-case word or inside a paired placeholder; ends at `. ! ? …` and the
-  danda `।`. Each segment stores its source reference and a SHA-256 hash
-  (placeholders renumbered, so repeated sentences match).
+  danda `।`. Each segment stores its source reference and a SHA-256 hash.
+  It runs after assembly, so a sentence across a page break is one segment.
 - **EPUB** ([`EpubPackage.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/epub/EpubPackage.kt),
   [`EpubParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/epub/EpubParser.kt)):
   OPF, NCX and nav are read; chapter text comes from the XHTML DOM's text
-  nodes; the title metadata, TOC labels (NCX and nav) and image alt text are
-  translatable units too. Code, `<pre>`, scripts, styles, SVG, MathML and
-  `translate="no"` are skipped; CSS, images and fonts are never opened.
-  Source map: file + XPath (+ attribute). The rebuilder writes translations
-  back with their tags, sets `dc:language` / `xml:lang`, copies every other
+  nodes; the title metadata, TOC labels and image alt text are units too.
+  Code, `<pre>`, scripts, styles, SVG, MathML and `translate="no"` are
+  skipped. Source map: file + XPath (+ attribute). The rebuilder writes
+  translations back with their tags (a paragraph joined across two files is
+  split back into both), sets `dc:language` / `xml:lang`, copies every other
   file byte for byte, and its output passes EPUBCheck.
 - **PDF** ([`PdfParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfParser.kt),
   [`PdfLayout.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfLayout.kt)):
-  each page's text layer is checked (no usable text but images = scanned;
-  a mostly scanned book stops with a "needs OCR" message); glyphs become
-  lines with box, font, size, bold and italic; running headers, footers and
-  page numbers are dropped; tables are found (one unit per cell); column
-  gutters give the reading order; headings, list items, footnotes (small
-  text at the bottom; superscript marks become `[[SUP_n]]`) and paragraphs
-  are rebuilt, with words hyphenated at line ends rejoined. Bold / italic
-  spans become placeholders. Source map: page + bounding box, per segment.
+  scanned pages are detected (a mostly scanned book stops with "needs
+  OCR"). Every block is classified as body, heading, list item, header,
+  footer, page number, caption, table cell, footnote, boilerplate or
+  unknown, from its margin zone, repetition across pages (odd and even
+  pages counted apart, or a run of pages for a chapter's running head),
+  font size and the configured patterns (a running head's number must move
+  with the page, so a one-line footnote is not taken for one). Furniture is
+  kept with its page and box for the rebuilder but never translated.
+  Pages left blank on purpose, printer's slugs and pages with only a
+  number are boilerplate. Columns are found per region and read one at a
+  time (columns of entries such as addresses keep one block per line;
+  tables need text that does not run on down a column). Paragraphs break at
+  a gap over 1.3× the measured line spacing or a first-line indent; list
+  items keep their bullet as marker and their nesting; captions are found by
+  pattern, by an image next to them or inside a figure; every block keeps
+  its font tier (0 body, 1, 2… larger sizes, −1 smaller).
+- **Document assembly** ([`DocumentAssembler.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/DocumentAssembler.kt)):
+  one text stream for the whole book. A paragraph cut by a page, column or
+  EPUB file break is joined back when the first half lacks terminal
+  punctuation and the second is running text in the body font tier (never
+  a heading or a new list item); footnotes, figures, captions, tables and
+  furniture in between are skipped over. Each paragraph records its source
+  parts (its page span) to be split back at the nearest sentence.
+- **Hyphenation** ([`Hyphenation.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/Hyphenation.kt)):
+  no dictionary is bundled. "contrap-" + "tions" joins when the book writes
+  "contraptions" anywhere, or when the continuation is lower case and not a
+  standalone word; "well-" + "known" keeps its hyphen when the book writes
+  "well-known" mid-line or uses "known" on its own (plus an optional
+  configured list of standalone words, empty by default).
+- **Paragraph requests** ([`MarkerChunks.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/translate/MarkerChunks.kt),
+  [`ParagraphTranslator.kt`](app/src/main/java/com/example/hinglishpdf/data/translate/ParagraphTranslator.kt),
+  [`PipelinePages.kt`](app/src/main/java/com/example/hinglishpdf/data/translate/PipelinePages.kt)):
+  1 to 3 whole paragraphs per request (at most 800 words; a longer
+  paragraph goes alone, cut between sentences), never by page. Markers
+  `{P}` `{LI}` `{H1}`–`{H6}` `{Q}` `{CAP}` `{FN}` `{TD}` `{TOC}` `{T}` `{ALT}`
+  `{X}` and `{COL}` are copied back by the model and match each answer to its
+  paragraph; a mismatch, an empty answer or lost placeholders are asked
+  again paragraph by paragraph, and placeholders still lost are restored at
+  the end of the text. Pages are still what is saved and shown ("page 45 of
+  300"): a page is saved once every paragraph on it is translated. Smaller
+  requests mean more of them, so a free tier with a low per-minute limit is
+  slower; `chunkMaxParagraphs` and `chunkMaxWords` set the size.
 - **Storage:** database version 2 adds `parsed_documents`, `paragraphs` and
-  `segments` (additive migration; existing books are untouched). Schemas are
-  exported to `app/schemas/`.
+  `segments`. Roles, font tiers, columns, list markers and source parts use
+  the existing columns (no migration). Books from before 4.4 keep their
+  page-by-page translation. After a parser upgrade the app says
+  "Re-analysing N books with the improved parser; your translations are
+  kept" before re-analysing in the background.
 - **OCR** (Google ML Kit, on the phone) comes after text-based PDFs.
 
 ## Project structure

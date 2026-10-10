@@ -89,7 +89,7 @@ internal fun PageView(page: PageEntity, unit: String) {
                 HorizontalDivider()
                 var previous: DocBlock? = null
                 page.sourceBlocks.forEachIndexed { i, block ->
-                    val text = page.translations?.getOrNull(i) ?: block.text
+                    val text = block.plain(page.translations?.getOrNull(i) ?: block.text)
                     if (text.isNotBlank()) {
                         BlockView(block, text, previous)
                         previous = block

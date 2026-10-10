@@ -101,6 +101,29 @@ object Placeholders {
         }
     }
 
+    /**
+     * What a reader sees of placeholder text: paired tags dropped (their text
+     * kept), protected literals and footnote marks as written, other
+     * standalone elements as their own text (an image as nothing, a line
+     * break as a space).
+     */
+    fun toPlain(text: String, tags: List<PlaceholderTag>): String {
+        val byId = tags.associateBy { it.id }
+        return tokenize(text).joinToString("") { token ->
+            when (token) {
+                is PlaceholderToken.Text -> token.text
+                is PlaceholderToken.Open, is PlaceholderToken.Close -> ""
+                is PlaceholderToken.Standalone -> {
+                    val markup = byId[token.id]?.markup.orEmpty()
+                    when {
+                        !markup.trimStart().startsWith("<") -> markup
+                        else -> org.jsoup.Jsoup.parseBodyFragment(markup).text().ifEmpty { if (token.label == "BR") " " else "" }
+                    }
+                }
+            }
+        }
+    }
+
     /** [text] with every placeholder id moved by [offset] (joining paragraphs keeps ids unique). */
     fun shift(text: String, offset: Int): String {
         if (offset == 0) return text
@@ -182,10 +205,13 @@ class PlaceholderTextBuilder(private var nextId: Int = 1) {
 
     val length: Int get() = text.length
 
-    /** Adds reader-visible text; anything in it that looks like a placeholder is protected. */
+    /**
+     * Adds reader-visible text; anything in it that looks like a placeholder
+     * (or a structure marker such as {P}) is protected.
+     */
     fun text(value: String) {
         var at = 0
-        for (m in Placeholders.TOKEN.findAll(value)) {
+        for (m in PROTECTED.findAll(value)) {
             text.append(value, at, m.range.first)
             standalone(PlaceholderTag.LITERAL, m.value)
             at = m.range.last + 1
@@ -209,6 +235,10 @@ class PlaceholderTextBuilder(private var nextId: Int = 1) {
         val tag = PlaceholderTag(nextId++, PlaceholderTag.Kind.STANDALONE, label.uppercase().filter(Char::isLetterOrDigit).ifEmpty { "X" }, markup)
         tags += tag
         text.append(tag.open)
+    }
+
+    private companion object {
+        val PROTECTED = Regex(Placeholders.TOKEN.pattern + "|\\{(?:COL|P|LI|H[1-6]|Q|CAP|FN|TD|TOC|T|ALT|X)\\}")
     }
 
     /** The placeholder text and its tags; every paired tag must be closed. */

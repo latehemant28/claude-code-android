@@ -115,6 +115,10 @@ interface PipelineDao {
     @Query("SELECT bookId FROM parsed_documents WHERE needsOcr = 1")
     fun observeNeedsOcr(): kotlinx.coroutines.flow.Flow<List<Long>>
 
+    /** Books whose stored parse was made by a parser older than [version]. */
+    @Query("SELECT bookId FROM parsed_documents WHERE parserVersion < :version")
+    suspend fun outdated(version: Int): List<Long>
+
     @Query("SELECT COUNT(*) FROM segments WHERE bookId = :bookId")
     suspend fun segmentCount(bookId: Long): Int
 

@@ -11,7 +11,7 @@ object DocumentFormatter {
         val out = StringBuilder()
         var previous: DocBlock? = null
         blocks.forEachIndexed { index, block ->
-            val text = translations.getOrNull(index) ?: block.text
+            val text = block.plain(translations.getOrNull(index) ?: block.text)
             if (text.isBlank()) return@forEachIndexed
 
             val isList = block.kind == BlockKind.BULLET || block.kind == BlockKind.NUMBERED

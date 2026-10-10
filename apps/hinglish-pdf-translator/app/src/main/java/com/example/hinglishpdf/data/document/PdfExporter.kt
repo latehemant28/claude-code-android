@@ -33,7 +33,7 @@ class PdfExporter(private val fonts: BundledFonts) {
             Section(
                 page.pageNumber,
                 page.sourceBlocks.mapIndexedNotNull { i, block ->
-                    val text = page.translations?.getOrNull(i) ?: block.text
+                    val text = block.plain(page.translations?.getOrNull(i) ?: block.text)
                     if (text.isBlank()) null else block to text
                 },
             )

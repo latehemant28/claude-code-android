@@ -16,9 +16,14 @@ import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.document.DocumentFormatter
 import com.example.hinglishpdf.data.PageEvent
 import com.example.hinglishpdf.data.pdf.PdfPasswordProtectedException
+import com.example.hinglishpdf.data.db.PageEntity
+import com.example.hinglishpdf.data.document.BookImporter
+import com.example.hinglishpdf.data.translate.PageFiller
+import com.example.hinglishpdf.data.translate.PipelinePages
 import com.example.hinglishpdf.pipeline.NeedsOcrException
+import com.example.hinglishpdf.pipeline.segment.ParsedDocument
+import com.example.hinglishpdf.pipeline.translate.ParagraphChunker
 import com.example.hinglishpdf.ui.status.Eta
-import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +33,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 /**
  * Translates books in the background, page by page, with a persistent
@@ -104,24 +108,28 @@ class TranslationService : Service() {
                 "No API key for ${app.providers.state.value.provider.displayName}. Paste one in the app, then tap Resume."
             }
 
-            // 0. The pipeline's parse, once per book: paragraphs, sentence segments,
-            // placeholders and the source map. A scanned PDF stops here (it needs
-            // OCR). Any other problem with the new parser is logged and the
-            // book carries on with the page-by-page translation below.
-            analyse(initial)
+            // 0. The pipeline's parse, once per book (again after a parser upgrade):
+            // assembled paragraphs, sentence segments, placeholders and the source
+            // map. A scanned PDF stops here (it needs OCR). Any other problem with
+            // the parser is logged and the book is translated page by page instead.
+            val doc = analyse(initial)
 
-            // 1. Extract the pages once. Pages are stored in one transaction, so
-            // an interrupted extraction leaves none and is simply redone; a
-            // resumed book keeps its pages and their saved translations.
+            // 1. The pages, once. Pages are stored in one transaction, so an
+            // interrupted extraction leaves none and is simply redone; a resumed
+            // book keeps its pages and their saved translations.
             if (pages.count(id) == 0) {
                 books.setStatus(id, BookStatus.READING)
-                var lastShown = 0L
-                val extracted = app.importer.readPages(initial) { label, done, total ->
-                    app.monitor.progress(LivePhase.READING, done, total, label)
-                    val now = System.currentTimeMillis()
-                    if (now - lastShown > 1_000) { // don't flood the notification
-                        lastShown = now
-                        showProgress(initial, label, done, total)
+                val built = doc?.takeIf { d -> d.paragraphs.any { it.translatable } }
+                    ?.let { PipelinePages.build(id, it, initial.format, BookImporter.EPUB_SECTION_WORDS) }
+                val extracted = built ?: run {
+                    var lastShown = 0L
+                    app.importer.readPages(initial) { label, done, total ->
+                        app.monitor.progress(LivePhase.READING, done, total, label)
+                        val now = System.currentTimeMillis()
+                        if (now - lastShown > 1_000) { // don't flood the notification
+                            lastShown = now
+                            showProgress(initial, label, done, total)
+                        }
                     }
                 }
                 pages.replacePages(id, extracted)
@@ -129,56 +137,11 @@ class TranslationService : Service() {
             }
             books.setStatus(id, BookStatus.TRANSLATING)
             val book = books.get(id) ?: return
-            val unit = book.unitName
 
-            // 2. Translate page by page with the selected AI provider, saving each page immediately.
-            while (true) {
-                val page = pages.nextUntranslated(id) ?: break
-                val label = "Translating $unit ${page.pageNumber} of ${book.pageCount}..."
-                app.monitor.update {
-                    it.copy(
-                        label = label, page = page.pageNumber, chunk = 0, chunkCount = 0,
-                        pageBlocks = page.sourceBlocks, pageTranslations = emptyList(),
-                        liveText = "", waiting = false,
-                    )
-                }
-                app.monitor.progress(LivePhase.TRANSLATING, page.pageNumber - 1, book.pageCount, label)
-                showProgress(book, withTimeLeft(label), page.pageNumber - 1, book.pageCount)
-
-                // The answer streams in; the page is saved only once complete.
-                var translations: List<String?> = emptyList()
-                app.translationRepository.translatePage(page.sourceBlocks).collect { event ->
-                    when (event) {
-                        is PageEvent.ChunkStarted -> {
-                            app.monitor.update {
-                                it.copy(chunk = event.chunk, chunkCount = event.chunkCount, liveText = "")
-                            }
-                            if (event.chunkCount > 1) {
-                                showProgress(book, "$label (part ${event.chunk}/${event.chunkCount})", page.pageNumber - 1, book.pageCount)
-                            }
-                        }
-                        is PageEvent.Token -> app.monitor.update {
-                            it.copy(label = label, waiting = false, liveText = it.liveText + event.text)
-                        }
-                        is PageEvent.Waiting -> {
-                            val message = "${event.reason}: retrying in ${event.seconds} s"
-                            app.monitor.update { it.copy(label = message, liveText = "", waiting = true) }
-                            showProgress(book, message, page.pageNumber - 1, book.pageCount)
-                        }
-                        is PageEvent.ChunkFinished -> app.monitor.update {
-                            it.copy(label = label, pageTranslations = event.translations, liveText = "", waiting = false)
-                        }
-                        is PageEvent.PageFinished -> translations = event.translations
-                    }
-                }
-                pages.saveTranslation(
-                    bookId = id,
-                    pageNumber = page.pageNumber,
-                    translations = translations,
-                    text = DocumentFormatter.toPlainText(page.sourceBlocks, translations),
-                    at = System.currentTimeMillis(),
-                )
-            }
+            // 2. Translate, saving each page the moment it is complete. Books whose
+            // pages were built from the parse go paragraph by paragraph (whole
+            // paragraphs, even across page breaks); older books page by page.
+            if (doc != null && PipelinePages.isPipeline(pages.pages(id))) translateParagraphs(book, doc) else translatePages(book)
 
             // 3. Build the PDF or EPUB (the Output Format toggle) and save it to Downloads.
             val format = app.preferences.outputFormat.value
@@ -204,31 +167,137 @@ class TranslationService : Service() {
         }
     }
 
-    private suspend fun analyse(book: BookEntity) {
-        val dao = app.db.pipelineDao()
-        val stored = dao.document(book.id)
-        if (stored == null) {
-            app.db.bookDao().setStatus(book.id, BookStatus.READING)
-            val parsed = try {
-                withContext(Dispatchers.IO) {
-                    app.documentParser.parse(File(book.sourcePath), book.format) { label, done, total ->
-                        app.monitor.progress(LivePhase.ANALYSING, done, total, label)
-                        if (done == total || done % 10 == 0) showProgress(book, label, done, total)
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: PdfPasswordProtectedException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "Pipeline parse of book ${book.id} failed; continuing without it", e)
-                return
+    /** Books from before the pipeline: page by page, each page saved immediately. */
+    private suspend fun translatePages(book: BookEntity) {
+        val id = book.id
+        val pages = app.db.pageDao()
+        val unit = book.unitName
+        while (true) {
+            val page = pages.nextUntranslated(id) ?: break
+            val label = "Translating $unit ${page.pageNumber} of ${book.pageCount}..."
+            app.monitor.update {
+                it.copy(
+                    label = label, page = page.pageNumber, chunk = 0, chunkCount = 0,
+                    pageBlocks = page.sourceBlocks, pageTranslations = emptyList(),
+                    liveText = "", waiting = false,
+                )
             }
-            app.pipelineStore.save(book.id, parsed)
-            if (parsed.needsOcr) throw NeedsOcrException(parsed.scannedPages.size, parsed.pageCount)
-        } else if (stored.needsOcr) {
-            throw NeedsOcrException(JsonParser.parseString(stored.scannedPages).asJsonArray.size(), stored.pageCount)
+            app.monitor.progress(LivePhase.TRANSLATING, page.pageNumber - 1, book.pageCount, label)
+            showProgress(book, withTimeLeft(label), page.pageNumber - 1, book.pageCount)
+
+            // The answer streams in; the page is saved only once complete.
+            var translations: List<String?> = emptyList()
+            app.translationRepository.translatePage(page.sourceBlocks).collect { event ->
+                when (event) {
+                    is PageEvent.ChunkStarted -> {
+                        app.monitor.update {
+                            it.copy(chunk = event.chunk, chunkCount = event.chunkCount, liveText = "")
+                        }
+                        if (event.chunkCount > 1) {
+                            showProgress(book, "$label (part ${event.chunk}/${event.chunkCount})", page.pageNumber - 1, book.pageCount)
+                        }
+                    }
+                    is PageEvent.Token -> app.monitor.update {
+                        it.copy(label = label, waiting = false, liveText = it.liveText + event.text)
+                    }
+                    is PageEvent.Waiting -> {
+                        val message = "${event.reason}: retrying in ${event.seconds} s"
+                        app.monitor.update { it.copy(label = message, liveText = "", waiting = true) }
+                        showProgress(book, message, page.pageNumber - 1, book.pageCount)
+                    }
+                    is PageEvent.ChunkFinished -> app.monitor.update {
+                        it.copy(label = label, pageTranslations = event.translations, liveText = "", waiting = false)
+                    }
+                    is PageEvent.PageFinished -> translations = event.translations
+                }
+            }
+            pages.saveTranslation(
+                bookId = id,
+                pageNumber = page.pageNumber,
+                translations = translations,
+                text = DocumentFormatter.toPlainText(page.sourceBlocks, translations),
+                at = System.currentTimeMillis(),
+            )
         }
+    }
+
+    /**
+     * Books translated through the pipeline: requests of 1-3 whole
+     * paragraphs with their structure markers, in reading order across page
+     * breaks. Each page is saved once every paragraph on it is translated,
+     * and progress is shown in pages ("page 45 of 300", the page the
+     * current paragraph starts on).
+     */
+    private suspend fun translateParagraphs(book: BookEntity, doc: ParsedDocument) {
+        val id = book.id
+        val pageDao = app.db.pageDao()
+        val unit = book.unitName
+        val all = pageDao.pages(id)
+        val filler = PageFiller(all.filter { it.translations == null }, doc.paragraphs)
+        var saved = all.count { it.translations != null }
+        suspend fun save(done: List<PageEntity>) = done.forEach { page ->
+            pageDao.saveTranslation(id, page.pageNumber, page.translations.orEmpty(), page.translatedText.orEmpty(), System.currentTimeMillis())
+            saved++
+        }
+        save(filler.release())
+
+        val config = app.pipelineConfig
+        val chunks = ParagraphChunker.chunks(ParagraphChunker.units(doc.paragraphs, config, filler.paragraphsToTranslate), config)
+        for (chunk in chunks) {
+            val page = filler.pageOf(chunk.first().paragraph)
+            val label = "Translating $unit $page of ${book.pageCount}..."
+            val (blocks, sofar) = filler.progress(page)
+            app.monitor.update {
+                it.copy(
+                    label = label, page = page, chunk = 0, chunkCount = 0,
+                    pageBlocks = blocks, pageTranslations = sofar, liveText = "", waiting = false,
+                )
+            }
+            app.monitor.progress(LivePhase.TRANSLATING, saved, book.pageCount, label)
+            showProgress(book, withTimeLeft(label), saved, book.pageCount)
+
+            var result: List<String?> = emptyList()
+            app.paragraphTranslator.translate(chunk).collect { event ->
+                when (event) {
+                    is PageEvent.Token -> app.monitor.update { it.copy(label = label, waiting = false, liveText = it.liveText + event.text) }
+                    is PageEvent.Waiting -> {
+                        val message = "${event.reason}: retrying in ${event.seconds} s"
+                        app.monitor.update { it.copy(label = message, liveText = "", waiting = true) }
+                        showProgress(book, message, saved, book.pageCount)
+                    }
+                    is PageEvent.PageFinished -> result = event.translations
+                    else -> Unit
+                }
+            }
+            save(filler.fill(chunk, result))
+            app.monitor.update { it.copy(pageTranslations = filler.progress(page).second, liveText = "") }
+        }
+        save(filler.finish())
+    }
+
+    /** The book's pipeline parse (made or remade as needed); null if the parser failed on it. */
+    private suspend fun analyse(book: BookEntity): ParsedDocument? {
+        val doc = try {
+            app.pipelineDocument(
+                book,
+                onReanalyse = {
+                    app.monitor.update { it.copy(label = REANALYSE_NOTICE) }
+                    showProgress(book, REANALYSE_NOTICE, 0, 0)
+                },
+            ) { label, done, total ->
+                app.monitor.progress(LivePhase.ANALYSING, done, total, label)
+                if (done == total || done % 10 == 0) showProgress(book, label, done, total)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: PdfPasswordProtectedException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Pipeline parse of book ${book.id} failed; translating it page by page", e)
+            return null
+        }
+        if (doc.needsOcr) throw NeedsOcrException(doc.scannedPages.size, doc.pageCount)
+        return doc
     }
 
     /** "Translating page 45 of 300... · About 25 min left" (under-promised; see Eta). */
@@ -268,6 +337,7 @@ class TranslationService : Service() {
 
     companion object {
         private const val TAG = "TranslationService"
+        const val REANALYSE_NOTICE = "Re-analysing this book with the improved parser; your translations are kept"
         const val ACTION_PAUSE = "com.example.hinglishpdf.PAUSE"
         private const val WAKE_LOCK_TIMEOUT_MS = 12 * 60 * 60 * 1000L
 

@@ -12,6 +12,11 @@ import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.PdfExporter
 import com.example.hinglishpdf.data.epub.EpubBook
 import com.example.hinglishpdf.data.epub.EpubWriter
+import com.example.hinglishpdf.data.db.PageEntity
+import com.example.hinglishpdf.data.translate.PipelinePages
+import com.example.hinglishpdf.pipeline.PipelineStore
+import com.example.hinglishpdf.pipeline.epub.EpubRebuilder
+import com.example.hinglishpdf.pipeline.segment.ParsedDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -43,9 +48,16 @@ class BookExporter(
     suspend fun exportToDownloads(book: BookEntity, format: DocFormat): Saved = withContext(Dispatchers.IO) {
         val pages = db.pageDao().pages(book.id)
         val name = "${book.title} (Hindi).${format.extension}"
+        val pipelineEpub = format == DocFormat.EPUB && book.format == DocFormat.EPUB && PipelinePages.isPipeline(pages)
+        val doc = if (pipelineEpub) {
+            PipelineStore(db.pipelineDao()).load(book.id) ?: throw IOException("The book's analysis is missing; tap Resume to analyse it again.")
+        } else {
+            null
+        }
         val uri = saveToDownloads(name, format.mimeType) { out ->
             when {
                 format == DocFormat.PDF -> PdfExporter(fonts).write(out, pages, sourceIsPdf = book.format == DocFormat.PDF)
+                doc != null -> rebuildEpub(book, doc, pages, out)
                 book.format == DocFormat.EPUB -> EpubBook.writeTranslated(
                     File(book.sourcePath),
                     out,
@@ -58,7 +70,7 @@ class BookExporter(
                         EpubWriter.Section(
                             page.pageNumber,
                             page.sourceBlocks.mapIndexedNotNull { i, block ->
-                                val text = page.translations?.getOrNull(i) ?: block.text
+                                val text = block.plain(page.translations?.getOrNull(i) ?: block.text)
                                 if (text.isBlank()) null else block to text
                             },
                         )
@@ -70,6 +82,22 @@ class BookExporter(
         }
         db.bookDao().setOutput(book.id, uri.toString(), name)
         Saved(uri, name, format)
+    }
+
+    /**
+     * EPUB from an EPUB translated through the pipeline: each paragraph's
+     * translation goes back into the element(s) it came from, with its inline
+     * markup, and the language is set to Hindi.
+     */
+    private fun rebuildEpub(book: BookEntity, doc: ParsedDocument, pages: List<PageEntity>, out: OutputStream) {
+        val translations = arrayOfNulls<String>(doc.paragraphs.size)
+        for (page in pages) {
+            page.sourceBlocks.forEachIndexed { i, block ->
+                val index = block.paragraph ?: return@forEachIndexed
+                page.translations?.getOrNull(i)?.let { translations[index] = it }
+            }
+        }
+        EpubRebuilder.rebuild(File(book.sourcePath), out, doc.paragraphs, translations.toList(), language = "hi")
     }
 
     /**

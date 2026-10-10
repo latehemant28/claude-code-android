@@ -12,7 +12,15 @@ import com.example.hinglishpdf.data.pdf.PdfTextExtractor
 import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.settings.AppPreferences
 import com.example.hinglishpdf.data.settings.ProviderSettings
+import android.util.Log
+import com.example.hinglishpdf.data.db.BookEntity
+import com.example.hinglishpdf.data.translate.ParagraphTranslator
 import com.example.hinglishpdf.pipeline.DocumentParser
+import com.example.hinglishpdf.pipeline.segment.ParsedDocument
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import com.example.hinglishpdf.pipeline.PipelineConfig
 import com.example.hinglishpdf.pipeline.PipelineStore
 import com.example.hinglishpdf.service.Notifications
@@ -90,6 +98,55 @@ class HinglishApp : Application() {
 
     /** Reading font and text size chosen in the "Aa" sheet. */
     val readerSettings by lazy { ReaderSettingsStore(this) }
+
+    /** Translates the pipeline's paragraph chunks through [translationRepository]. */
+    val paragraphTranslator by lazy { ParagraphTranslator(translationRepository) }
+
+    private val parseLock = Mutex()
+
+    /**
+     * The book's pipeline parse: the stored one, or a new one when there is
+     * none or an older parser made it ([onReanalyse] is told first). A parse
+     * the book's pages were built from is kept whatever its version, so the
+     * pages stay valid. Throws if the file cannot be parsed.
+     */
+    suspend fun pipelineDocument(
+        book: BookEntity,
+        onReanalyse: () -> Unit = {},
+        onProgress: (label: String, done: Int, total: Int) -> Unit = { _, _, _ -> },
+    ): ParsedDocument = parseLock.withLock {
+        val stored = db.pipelineDao().document(book.id)
+        val current = stored != null && (stored.parserVersion >= PipelineStore.PARSER_VERSION || db.pageDao().pipelinePageCount(book.id) > 0)
+        if (current) pipelineStore.load(book.id)?.let { return@withLock it }
+        if (stored != null) onReanalyse()
+        val parsed = withContext(Dispatchers.IO) { documentParser.parse(File(book.sourcePath), book.format, onProgress) }
+        pipelineStore.save(book.id, parsed)
+        parsed
+    }
+
+    /** Books whose stored parse an older parser made, to re-analyse (their translations are not touched). */
+    suspend fun outdatedParses(): List<Long> =
+        db.pipelineDao().outdated(PipelineStore.PARSER_VERSION).filter { db.pageDao().pipelinePageCount(it) == 0 }
+
+    /**
+     * Re-analyses [bookIds] in the background. A book the new parser cannot
+     * read loses only its outdated parse (it is made again when needed);
+     * the book, its pages and its translations stay.
+     */
+    fun reanalyse(bookIds: List<Long>) = appScope.launch(Dispatchers.IO) {
+        for (id in bookIds) {
+            val book = db.bookDao().get(id) ?: continue
+            try {
+                pipelineDocument(book)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("HinglishApp", "Re-analysis of book $id failed", e)
+                db.pipelineDao().deleteParagraphs(id)
+                db.pipelineDao().deleteDocument(id)
+            }
+        }
+    }
 
     val importer by lazy { BookImporter(this, PdfTextExtractor(this)) }
     val exporter by lazy { BookExporter(this, db, BundledFonts(assets)) }

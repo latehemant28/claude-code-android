@@ -14,6 +14,8 @@ import com.example.hinglishpdf.data.db.PageEntity
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.settings.ProviderSettings
+import com.example.hinglishpdf.pipeline.segment.Placeholders
+import com.example.hinglishpdf.pipeline.translate.MarkerPrompt
 import com.example.hinglishpdf.ui.reader.ReaderFont
 import com.example.hinglishpdf.ui.reader.ReaderStyle
 import com.example.hinglishpdf.service.LiveStatus
@@ -140,8 +142,9 @@ data class LivePage(
             page = s.page,
             chunk = s.chunk,
             chunkCount = s.chunkCount,
-            blocks = s.pageBlocks.mapIndexedNotNull { i, b -> s.pageTranslations.getOrNull(i)?.let { b to it } },
-            streaming = s.liveText.trim(),
+            blocks = s.pageBlocks.mapIndexedNotNull { i, b -> s.pageTranslations.getOrNull(i)?.let { b to b.plain(it) } },
+            // Pipeline requests stream structure markers and placeholders: show only the words.
+            streaming = MarkerPrompt.stripMarkers(Placeholders.strip(s.liveText)).trim(),
         )
     }
 }
@@ -224,6 +227,14 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
+        // After a parser upgrade: say so, then re-analyse the books in the background.
+        viewModelScope.launch {
+            val outdated = app.outdatedParses()
+            if (outdated.isNotEmpty()) {
+                showMessage(reanalyseNotice(outdated.size))
+                app.reanalyse(outdated)
+            }
+        }
         // After a crash, a force-stop or a reboot: pick up where we stopped.
         viewModelScope.launch {
             if (app.translatorConfigured && app.preferences.termsAccepted && !app.monitor.status.value.running &&
@@ -380,6 +391,10 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     fun messageShown(shown: UiMessage) = local.update { if (it.message === shown) it.copy(message = null) else it }
 
     companion object {
+        /** Shown before books are re-analysed after a parser upgrade (never silently). */
+        fun reanalyseNotice(books: Int): String =
+            "Re-analysing $books ${if (books == 1) "book" else "books"} with the improved parser; your translations are kept"
+
         val Factory = viewModelFactory {
             initializer { TranslatorViewModel(this[APPLICATION_KEY] as HinglishApp) }
         }

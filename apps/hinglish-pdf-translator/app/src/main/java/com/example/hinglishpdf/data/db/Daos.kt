@@ -59,6 +59,10 @@ interface PageDao {
     @Query("SELECT COUNT(*) FROM pages WHERE bookId = :bookId")
     suspend fun count(bookId: Long): Int
 
+    /** Pages built from the book's pipeline parse: their blocks point at its paragraphs (see PipelinePages). */
+    @Query("SELECT COUNT(*) FROM pages WHERE bookId = :bookId AND sourceBlocks LIKE '%\"paragraph\":%'")
+    suspend fun pipelinePageCount(bookId: Long): Int
+
     /** Where to resume: the first page without a saved translation. */
     @Query("SELECT * FROM pages WHERE bookId = :bookId AND translations IS NULL ORDER BY pageNumber LIMIT 1")
     suspend fun nextUntranslated(bookId: Long): PageEntity?

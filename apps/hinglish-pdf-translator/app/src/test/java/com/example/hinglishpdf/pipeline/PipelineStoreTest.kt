@@ -63,4 +63,28 @@ class PipelineStoreTest {
         assertEquals(PipelineStore.PARSER_VERSION, db.pipelineDao().document(bookId)!!.parserVersion)
         assertEquals(1..2, back.paragraphs[1].pages)
     }
+
+    @Test
+    fun `books parsed by an older parser are found, unless their pages were built from that parse`() = runTest {
+        suspend fun book() = db.bookDao().insert(BookEntity(title = "B", format = DocFormat.EPUB, sourcePath = "/x", status = BookStatus.QUEUED, createdAt = 1L))
+        val old = book()
+        val oldWithPages = book()
+        val current = book()
+        val store = PipelineStore(db.pipelineDao())
+        val paragraphs = DocumentAssembler(PipelineConfig()).assemble(
+            listOf(ParsedParagraph(ParagraphRole.PARAGRAPH, "Text.", emptyList(), SourceRef.Epub("a.xhtml", "/p[1]"))),
+        )
+        val doc = ParsedDocument(null, null, emptyMap(), false, 1, emptyList(), false, paragraphs, Segmenter.segment(paragraphs))
+        for (id in listOf(old, oldWithPages, current)) store.save(id, doc)
+        // Make two of them look like version 1 parses.
+        db.openHelper.writableDatabase.execSQL("UPDATE parsed_documents SET parserVersion = 1 WHERE bookId IN ($old, $oldWithPages)")
+        db.pageDao().replacePages(oldWithPages, com.example.hinglishpdf.data.translate.PipelinePages.build(oldWithPages, doc, DocFormat.EPUB, 350))
+        assertEquals(listOf(old, oldWithPages), db.pipelineDao().outdated(PipelineStore.PARSER_VERSION).sorted())
+        assertEquals(1, db.pageDao().pipelinePageCount(oldWithPages))
+        assertEquals(0, db.pageDao().pipelinePageCount(old))
+        assertEquals(
+            "Re-analysing 2 books with the improved parser; your translations are kept",
+            com.example.hinglishpdf.ui.TranslatorViewModel.reanalyseNotice(2),
+        )
+    }
 }

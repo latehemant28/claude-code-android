@@ -88,7 +88,7 @@ class BookImporter(
         }
     }
 
-    private companion object {
+    companion object {
         /** About one printed page of a typical book. */
         const val EPUB_SECTION_WORDS = 350
     }
