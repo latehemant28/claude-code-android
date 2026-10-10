@@ -15,6 +15,7 @@ import com.google.ai.client.generativeai.type.RequestOptions
 import com.google.ai.client.generativeai.type.RequestTimeoutException
 import com.google.ai.client.generativeai.type.ResponseStoppedException
 import com.google.ai.client.generativeai.type.SafetySetting
+import com.google.ai.client.generativeai.type.SerializationException
 import com.google.ai.client.generativeai.type.ServerException
 import com.google.ai.client.generativeai.type.UnsupportedUserLocationException
 import com.google.ai.client.generativeai.type.content
@@ -178,6 +179,10 @@ class GeminiHinglishModel(
             is PromptBlockedException, is ResponseStoppedException ->
                 GeminiException.Blocked(e.message ?: "Gemini declined this text", e)
             is RequestTimeoutException -> GeminiException.Transient("Gemini took too long to answer", null, e)
+            // The SDK is no longer updated and can't read some parts newer models
+            // send (e.g. a part with no text). It's intermittent, so retry the chunk.
+            is SerializationException ->
+                GeminiException.Transient("Gemini sent an answer this app couldn't read", null, e)
             is ServerException -> {
                 val message = e.message.orEmpty()
                 when {

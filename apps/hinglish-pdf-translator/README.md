@@ -172,7 +172,7 @@ paces requests and handles Gemini's errors as follows:
 | Rate limit (429) | Another model in `GEMINI_MODELS` is tried first; if all are limited, **waits 60 s** (longer if Gemini asks) and tries again, **with no retry limit**. The book never stops for a rate limit, and the notification shows Gemini's own message |
 | "limit: 0" (no free quota for this model and key) | The model is skipped for the session, like a retired one |
 | Daily quota used up | Stops the book with a clear message; **Resume** later continues at the same page |
-| Network drop, timeout, 5xx | Retried with backoff (15 s → 5 min), up to 8 times, then stops; **Resume** continues at the same page |
+| Network drop, timeout, 5xx, or an answer the SDK can't read ("deserialize a response") | Retried with backoff (15 s → 5 min), up to 8 times, then stops; **Resume** continues at the same page |
 | Invalid key, region, or no usable model | Stops with a message saying what to fix |
 
 ### Threads

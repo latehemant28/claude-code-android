@@ -4,6 +4,7 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
 import com.google.ai.client.generativeai.type.InvalidAPIKeyException
 import com.google.ai.client.generativeai.type.QuotaExceededException
+import com.google.ai.client.generativeai.type.SerializationException
 import com.google.ai.client.generativeai.type.ServerException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -178,6 +179,10 @@ class TranslationRepositoryTest {
         assertTrue(classify(ServerException("503 The model is overloaded", null)) is GeminiException.Transient)
         assertTrue(classify(RuntimeException("wrapped", UnknownHostException("generativelanguage.googleapis.com"))) is GeminiException.Transient)
         assertTrue(classify(IOException("connection reset")) is GeminiException.Transient)
+        val unreadable = classify(
+            SerializationException("Something went wrong while trying to deserialize a response from the server.", null),
+        )
+        assertTrue(unreadable is GeminiException.Transient && !unreadable.rateLimited) // retried, not a book stop
         assertNull((classify(ServerException("500 internal", null)) as GeminiException.Transient).retryAfterMillis)
     }
 }
