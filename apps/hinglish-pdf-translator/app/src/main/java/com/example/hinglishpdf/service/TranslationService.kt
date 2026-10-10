@@ -147,8 +147,19 @@ class TranslationService : Service() {
                             it.copy(label = label, waiting = false, liveText = it.liveText + event.text)
                         }
                         is PageEvent.Waiting -> {
-                            val message = "${event.reason}: retrying in ${event.seconds} s"
+                            val message = if (event.rateLimited) {
+                                "Pausing for ${event.seconds}s to refresh limit..."
+                            } else {
+                                "${event.reason}: retrying in ${event.seconds} s"
+                            }
                             app.monitor.update { it.copy(label = message, liveText = "", waiting = true) }
+                            // The countdown ticks every second; the notification every 5 s is enough.
+                            if (event.seconds % 5 == 0) showProgress(book, message, page.pageNumber - 1, book.pageCount)
+                        }
+                        is PageEvent.ProviderSwitched -> {
+                            val message = "Switched to ${event.provider} and continuing"
+                            Log.w(TAG, "Provider switched to ${event.provider}: ${event.reason}")
+                            app.monitor.update { it.copy(label = message, liveText = "", waiting = false) }
                             showProgress(book, message, page.pageNumber - 1, book.pageCount)
                         }
                         is PageEvent.ChunkFinished -> app.monitor.update {

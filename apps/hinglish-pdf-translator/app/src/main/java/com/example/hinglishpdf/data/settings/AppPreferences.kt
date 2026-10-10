@@ -9,7 +9,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The From / To languages, the output format toggle, the Terms of Use
- * acceptance and the first-launch onboarding flag, saved on this phone.
+ * acceptance, the reader settings and the first-launch flags, saved on this
+ * phone (app-private SharedPreferences).
  */
 class AppPreferences(context: Context) {
 
@@ -54,13 +55,17 @@ class AppPreferences(context: Context) {
     }
 
     /**
-     * True only the very first time the app opens: the onboarding is shown
-     * then, and this records it at once, so it never appears on its own again
-     * (even if the app is closed in the middle of it).
+     * True only on the very first launch: the "Select your Target Language"
+     * popup is shown then. Recorded at once, so it never comes back by itself.
      */
-    fun takeFirstLaunch(): Boolean {
-        if (prefs.getBoolean(ONBOARDING_SHOWN, false)) return false
-        prefs.edit().putBoolean(ONBOARDING_SHOWN, true).apply()
+    fun takeLanguagePrompt(): Boolean = takeOnce(LANGUAGE_PROMPT_SHOWN)
+
+    /** True only on the very first launch: the spotlight tour of the main screen runs then. */
+    fun takeTour(): Boolean = takeOnce(TOUR_SHOWN)
+
+    private fun takeOnce(key: String): Boolean {
+        if (prefs.getBoolean(key, false)) return false
+        prefs.edit().putBoolean(key, true).apply()
         return true
     }
 
@@ -105,7 +110,8 @@ class AppPreferences(context: Context) {
         private const val OUTPUT_FORMAT = "output_format"
         private const val SOURCE_LANGUAGE = "source_language"
         private const val TARGET_LANGUAGE = "target_language"
-        private const val ONBOARDING_SHOWN = "onboarding_shown"
+        private const val LANGUAGE_PROMPT_SHOWN = "language_prompt_shown"
+        private const val TOUR_SHOWN = "tour_shown"
         private const val READER_DARK = "reader_dark"
         private const val READER_SCALE = "reader_scale"
         private const val TERMS_ACCEPTED_AT = "terms_accepted_at"

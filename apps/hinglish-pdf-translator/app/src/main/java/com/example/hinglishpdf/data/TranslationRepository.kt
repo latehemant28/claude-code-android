@@ -26,8 +26,15 @@ sealed interface PageEvent {
     /** New text from the AI for the current chunk. */
     data class Token(val text: String) : PageEvent
 
-    /** The provider asked us to slow down (or the network dropped); retrying after [seconds]. */
-    data class Waiting(val seconds: Int, val reason: String) : PageEvent
+    /**
+     * Waiting before trying again: [seconds] left, counting down once a second.
+     * [rateLimited]: the provider's per-minute limit ("Pausing for 60s to
+     * refresh limit..."); otherwise a dropped connection or a busy server.
+     */
+    data class Waiting(val seconds: Int, val reason: String, val rateLimited: Boolean = false) : PageEvent
+
+    /** The provider failed for good (no credit, bad key, daily quota...); another one with a saved key took over. */
+    data class ProviderSwitched(val provider: String, val reason: String) : PageEvent
 
     /** A chunk is done; [translations] holds every block finished so far. */
     data class ChunkFinished(val chunk: Int, val chunkCount: Int, val translations: List<String?>) : PageEvent
@@ -37,31 +44,42 @@ sealed interface PageEvent {
 }
 
 /**
- * Spaces requests out so the free tier's requests-per-minute limit is rarely
- * hit; slows down after every rate-limit error and speeds back up slowly
- * after successes.
+ * Spaces request starts out so a free tier's requests-per-minute limit is
+ * rarely hit (the spacing is asked each time: it depends on the provider
+ * selected); slows down further after every rate-limit error and speeds
+ * back up slowly after successes.
  */
 class RequestPacer(
-    private val minIntervalMillis: Long = 4_000, // 15 requests a minute at most
-    private val maxIntervalMillis: Long = 30_000,
+    private val minIntervalMillis: () -> Long = { 4_000 },
+    private val maxExtraMillis: Long = 30_000,
     private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val mutex = Mutex()
-    private var intervalMillis = minIntervalMillis
+    private var extraMillis = 0L
     private var lastStart: Long? = null
 
     suspend fun awaitTurn() = mutex.withLock {
-        lastStart?.let { delay(max(0, it + intervalMillis - now())) }
+        lastStart?.let { delay(max(0, it + minIntervalMillis() + extraMillis - now())) }
         lastStart = now()
     }
 
     fun onRateLimited() {
-        intervalMillis = min(maxIntervalMillis, intervalMillis * 2)
+        extraMillis = min(maxExtraMillis, max(2_000, extraMillis * 2))
     }
 
     fun onSuccess() {
-        intervalMillis = max(minIntervalMillis, intervalMillis * 9 / 10)
+        extraMillis = extraMillis * 9 / 10
     }
+}
+
+/**
+ * Smart fallback: when the provider in use fails for good (out of credit,
+ * bad key, daily quota used up, or still failing after every retry), switch
+ * to another provider the user has saved a key for, and carry on.
+ */
+fun interface ProviderFailover {
+    /** Switches provider after [error]; returns the new provider's name, or null if none is left. */
+    fun switchAfter(error: TranslatorException): String?
 }
 
 /**
@@ -88,6 +106,8 @@ class TranslationRepository(
     private val chunkPauseMillis: () -> Long = { CHUNK_PAUSE_MS },
     /** Shortest wait after a rate-limit (429) answer before trying again. */
     private val rateLimitWaitMillis: () -> Long = { RATE_LIMIT_WAIT_MS },
+    /** Takes over when a provider fails for good; null = the book stops instead. */
+    private val failover: ProviderFailover? = null,
 ) {
 
     fun translatePage(
@@ -183,24 +203,50 @@ class TranslationRepository(
                 return out.toString()
             } catch (e: TranslatorException.Transient) {
                 if (e.rateLimited) {
-                    // 429: wait (a full minute for Gemini, longer if asked) and try
-                    // again, for as long as it takes. Never stop the book for it.
+                    // 429: pause a full minute (longer if asked) to let the limit
+                    // refresh, then try again, for as long as it takes. Never stop
+                    // the book for it.
                     pacer.onRateLimited()
                     val wait = max(rateLimitWaitMillis(), e.retryAfterMillis ?: 0L)
-                    events.emit(PageEvent.Waiting(((wait + 999) / 1000).toInt(), e.message ?: "Rate limit"))
-                    delay(wait)
+                    countDown(wait, e.message ?: "Rate limit", rateLimited = true, events)
                     continue
                 }
                 attempt++
                 if (attempt > maxRetries) {
-                    throw TranslatorException.Fatal(
-                        "${e.message}. Gave up after $maxRetries retries; check the connection and tap Resume.", e,
+                    switchOrThrow(
+                        TranslatorException.Fatal(
+                            "${e.message}. Gave up after $maxRetries retries; check the connection and tap Resume.", e,
+                        ),
+                        events,
                     )
+                    attempt = 0
+                    continue
                 }
-                val wait = e.retryAfterMillis ?: backoffMillis(attempt)
-                events.emit(PageEvent.Waiting(((wait + 999) / 1000).toInt(), e.message ?: "Retrying"))
-                delay(wait)
+                countDown(e.retryAfterMillis ?: backoffMillis(attempt), e.message ?: "Retrying", rateLimited = false, events)
+            } catch (e: TranslatorException.Fatal) {
+                switchOrThrow(e, events)
+                attempt = 0
+            } catch (e: TranslatorException.DailyQuota) {
+                switchOrThrow(e, events)
+                attempt = 0
             }
+        }
+    }
+
+    /** Hands over to another provider with a saved key, or rethrows [error] when there is none. */
+    private suspend fun switchOrThrow(error: TranslatorException, events: FlowCollector<PageEvent>) {
+        val next = failover?.switchAfter(error) ?: throw error
+        events.emit(PageEvent.ProviderSwitched(next, error.message.orEmpty()))
+    }
+
+    /** Waits [millis], telling the screen how many seconds are left once a second. */
+    private suspend fun countDown(millis: Long, reason: String, rateLimited: Boolean, events: FlowCollector<PageEvent>) {
+        var left = millis
+        while (left > 0) {
+            events.emit(PageEvent.Waiting(((left + 999) / 1000).toInt(), reason, rateLimited))
+            val step = min(left, 1_000L)
+            delay(step)
+            left -= step
         }
     }
 

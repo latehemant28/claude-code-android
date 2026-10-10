@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -89,7 +90,16 @@ import com.example.hinglishpdf.data.document.bulletFor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit = {}) {
+fun TranslatorScreen(
+    viewModel: TranslatorViewModel,
+    /** First launch: ask for the target language. */
+    languagePrompt: Boolean = false,
+    onLanguagePromptDone: () -> Unit = {},
+    /** First launch (after the language), or from the menu: the spotlight tour. */
+    tour: Boolean = false,
+    onTourDone: () -> Unit = {},
+    onShowTutorial: () -> Unit = {},
+) {
     // Both collected on the main thread; the heavy work behind them runs on Dispatchers.Default.
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pages by viewModel.pages.collectAsStateWithLifecycle()
@@ -101,6 +111,8 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
     /** Runs once the Terms are accepted (the translation the user was starting). */
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     val providerSheet by viewModel.providerSheet.collectAsStateWithLifecycle()
+    val listState = rememberLazyListState()
+    val targets = remember { SpotlightTargets() }
     val keySaved by viewModel.keySaved.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
@@ -166,6 +178,17 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
 
     keySaved?.let { provider -> KeySavedCelebration(provider, onDone = viewModel::keySavedShown) }
 
+    if (languagePrompt) {
+        TargetLanguageDialog(
+            current = state.targetLanguage,
+            onSelect = {
+                viewModel.setTargetLanguage(it)
+                onLanguagePromptDone()
+            },
+            onDismiss = onLanguagePromptDone,
+        )
+    }
+
     if (showTextSettings) {
         ReaderSettingsSheet(
             style = readerStyle,
@@ -176,6 +199,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
     }
 
     CompositionLocalProvider(LocalReaderStyle provides readerStyle) {
+      Box(Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -218,22 +242,28 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 // Progressive disclosure: one compact line for the AI engine; its
                 // settings (provider, key, model) live in a sheet.
+                // Keep the order: NEW_BOOK_ITEM is the index of the Translate card.
+                item(key = "byok") { ByokBadge() }
+
                 item(key = "status") {
                     ApiStatusBanner(
                         settings = state.providers,
                         activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
                         onClick = { viewModel.showProviderSheet(true) },
+                        modifier = Modifier.spotlightTarget(targets, TourStep.API_KEY),
                     )
                 }
 
                 item(key = "languages") {
                     LanguageCard(
+                        modifier = Modifier.spotlightTarget(targets, TourStep.LANGUAGE),
                         source = state.sourceLanguage,
                         target = state.targetLanguage,
                         onSource = viewModel::setSourceLanguage,
@@ -250,6 +280,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
                 item(key = "new") {
                     NewBookCard(
                         target = state.targetLanguage.englishName,
+                        buttonModifier = Modifier.spotlightTarget(targets, TourStep.UPLOAD),
                         enabled = state.languagesValid && !state.importing,
                         importing = state.importing,
                         onPick = {
@@ -318,12 +349,31 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
                 }
             }
         }
+        if (tour && !languagePrompt) {
+            SpotlightTour(
+                targets = targets,
+                bringIntoView = { step ->
+                    if (step == TourStep.UPLOAD) {
+                        val item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "new" }
+                        if (item == null || item.offset + item.size > listState.layoutInfo.viewportEndOffset) {
+                            listState.animateScrollToItem(NEW_BOOK_ITEM)
+                        }
+                    } else {
+                        listState.animateScrollToItem(0)
+                    }
+                },
+                onDone = onTourDone,
+            )
+        }
+      }
     }
 }
+
 
 @Composable
 private fun NewBookCard(
     target: String,
+    buttonModifier: Modifier = Modifier,
     enabled: Boolean,
     importing: Boolean,
     onPick: () -> Unit,
@@ -346,7 +396,7 @@ private fun NewBookCard(
             Button(
                 onClick = onPick,
                 enabled = enabled,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                modifier = buttonModifier.fillMaxWidth().height(56.dp),
             ) {
                 Icon(Icons.Filled.UploadFile, contentDescription = null)
                 Spacer(Modifier.width(10.dp))
@@ -603,3 +653,6 @@ private fun BlockView(block: DocBlock, text: String, previous: DocBlock?) {
         }
     }
 }
+
+/** Index of the Translate card in the main list (badge, banner, languages, format, translate...). */
+private const val NEW_BOOK_ITEM = 4

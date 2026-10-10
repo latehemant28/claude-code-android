@@ -65,7 +65,12 @@ import com.example.hinglishpdf.data.settings.ProviderSettings
  * opens [ProviderSettingsSheet].
  */
 @Composable
-fun ApiStatusBanner(settings: ProviderSettings.State, activeModel: String?, onClick: () -> Unit) {
+fun ApiStatusBanner(
+    settings: ProviderSettings.State,
+    activeModel: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val configured = settings.configured
     val container = if (configured) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
     val content = if (configured) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onErrorContainer
@@ -74,7 +79,7 @@ fun ApiStatusBanner(settings: ProviderSettings.State, activeModel: String?, onCl
         shape = RoundedCornerShape(16.dp),
         color = container,
         contentColor = content,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Row(
             Modifier.padding(horizontal = 16.dp, vertical = 12.dp),

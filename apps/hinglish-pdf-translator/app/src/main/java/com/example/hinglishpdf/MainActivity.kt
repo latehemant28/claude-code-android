@@ -16,14 +16,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.hinglishpdf.ui.TranslatorScreen
 import com.example.hinglishpdf.ui.TranslatorViewModel
-import com.example.hinglishpdf.ui.onboarding.OnboardingScreen
 import com.example.hinglishpdf.ui.reader.BookReaderScreen
 import com.example.hinglishpdf.ui.reader.ReaderDocument
 import com.example.hinglishpdf.ui.theme.HinglishPdfTheme
 
-/** The app's three screens. */
+/** The app's two screens. */
 private sealed interface Screen {
-    data object Onboarding : Screen
     data object Main : Screen
     data class Reader(val document: ReaderDocument) : Screen
 }
@@ -38,14 +36,14 @@ class MainActivity : ComponentActivity() {
         val preferences = (application as HinglishApp).preferences
         setContent {
             HinglishPdfTheme {
-                // The tutorial appears by itself only on the very first launch (recorded at
-                // once); kept across rotation, and replayable from the menu.
-                var onboarding by rememberSaveable { mutableStateOf(preferences.takeFirstLaunch()) }
+                // Very first launch only (each recorded at once; kept across rotation): the
+                // target-language popup, then the spotlight tour (replayable from the menu).
+                var languagePrompt by rememberSaveable { mutableStateOf(preferences.takeLanguagePrompt()) }
+                var tour by rememberSaveable { mutableStateOf(preferences.takeTour()) }
                 val reading by viewModel.reader.collectAsStateWithLifecycle()
                 val dark by viewModel.readerDark.collectAsStateWithLifecycle()
                 val scale by viewModel.readerScale.collectAsStateWithLifecycle()
                 val screen = when {
-                    onboarding -> Screen.Onboarding
                     reading != null -> Screen.Reader(reading!!)
                     else -> Screen.Main
                 }
@@ -56,8 +54,14 @@ class MainActivity : ComponentActivity() {
                     label = "screen",
                 ) { target ->
                     when (target) {
-                        Screen.Onboarding -> OnboardingScreen(onFinish = { onboarding = false })
-                        Screen.Main -> TranslatorScreen(viewModel, onShowTutorial = { onboarding = true })
+                        Screen.Main -> TranslatorScreen(
+                            viewModel,
+                            languagePrompt = languagePrompt,
+                            onLanguagePromptDone = { languagePrompt = false },
+                            tour = tour,
+                            onTourDone = { tour = false },
+                            onShowTutorial = { tour = true },
+                        )
                         is Screen.Reader -> BookReaderScreen(
                             document = target.document,
                             dark = dark,

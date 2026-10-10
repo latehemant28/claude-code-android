@@ -129,8 +129,11 @@ class TranslationRepositoryTest {
         val events = repository(gemini).translatePage(page).toList()
 
         assertEquals(PageEvent.PageFinished(expected), events.last())
-        val waits = events.filterIsInstance<PageEvent.Waiting>().map { it.seconds }
-        assertEquals(List(12) { 60 }, waits) // 60 s even though Gemini said "retry in 20s"
+        val waits = events.filterIsInstance<PageEvent.Waiting>()
+        // Each pause counts down from 60 (even though Gemini said "retry in 20s") to 1, once a second.
+        assertEquals(12, waits.count { it.seconds == 60 })
+        assertEquals((60 downTo 1).toList(), waits.take(60).map { it.seconds })
+        assertTrue(waits.all { it.rateLimited })
         assertTrue(testScheduler.currentTime - start >= 12 * 60_000L)
     }
 
@@ -174,7 +177,7 @@ class TranslationRepositoryTest {
         var pause = 4_500L
         val repo = TranslationRepository(
             FakeGemini(),
-            RequestPacer(minIntervalMillis = 0, now = { testScheduler.currentTime }),
+            RequestPacer(minIntervalMillis = { 0 }, now = { testScheduler.currentTime }),
             workDispatcher = StandardTestDispatcher(testScheduler),
             chunkPauseMillis = { pause },
         )
@@ -186,5 +189,46 @@ class TranslationRepositoryTest {
         val second = testScheduler.currentTime
         repo.translatePage(page).toList()
         assertEquals(1_000L, testScheduler.currentTime - second)
+    }
+
+    @Test
+    fun `a provider that fails for good hands over to one with a saved key`() = runTest {
+        var switched = 0
+        val gemini = FakeGemini { request, _ -> if (request == 1) Fault.BAD_KEY else Fault.NONE }
+        val repo = TranslationRepository(
+            gemini,
+            RequestPacer(now = { testScheduler.currentTime }),
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            failover = ProviderFailover { switched++; "Google Gemini" },
+        )
+        val events = repo.translatePage(page).toList()
+        assertEquals(1, switched)
+        assertEquals(PageEvent.ProviderSwitched("Google Gemini", "Gemini rejected the API key."), events.filterIsInstance<PageEvent.ProviderSwitched>().single())
+        assertEquals(PageEvent.PageFinished(expected), events.last()) // carried on, nothing lost
+    }
+
+    @Test
+    fun `the daily quota hands over too, and with no other key the book stops`() = runTest {
+        val repo = TranslationRepository(
+            FakeGemini { _, _ -> Fault.DAILY_QUOTA },
+            RequestPacer(now = { testScheduler.currentTime }),
+            workDispatcher = StandardTestDispatcher(testScheduler),
+            failover = ProviderFailover { null }, // no other provider has a key
+        )
+        try {
+            repo.translatePage(page).toList()
+            fail("expected DailyQuota")
+        } catch (e: TranslatorException.DailyQuota) {
+            // expected
+        }
+    }
+
+    @Test
+    fun `pacing follows each provider's free tier`() {
+        assertEquals(20_000L, com.example.hinglishpdf.data.ai.AIProvider.OPENAI.chunkPauseMillis)
+        assertEquals(12_000L, com.example.hinglishpdf.data.ai.AIProvider.ANTHROPIC.chunkPauseMillis)
+        assertEquals(4_000L, com.example.hinglishpdf.data.ai.AIProvider.GEMINI.chunkPauseMillis)
+        assertEquals(2_000L, com.example.hinglishpdf.data.ai.AIProvider.GROQ.chunkPauseMillis)
+        com.example.hinglishpdf.data.ai.AIProvider.entries.forEach { assertEquals(60_000L, it.rateLimitWaitMillis) }
     }
 }

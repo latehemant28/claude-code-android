@@ -201,11 +201,15 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     fun setReaderTextSize(sp: Float) = app.readerSettings.setTextSize(sp)
 
     /** Picks the AI provider (Gemini, OpenAI, Claude, Groq) used for the next request. */
-    fun selectProvider(provider: AIProvider) = app.providers.select(provider)
+    fun selectProvider(provider: AIProvider) {
+        app.providers.select(provider)
+        app.resetFailover()
+    }
 
     /** Stores a pasted key on this phone, for [provider] only. */
     fun saveApiKey(provider: AIProvider, key: String) {
         app.providers.saveKey(provider, key)
+        app.resetFailover()
         _providerSheet.value = false
         _keySaved.value = provider
     }
@@ -217,6 +221,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
      */
     fun autoSaveKey(provider: AIProvider, key: String) {
         app.providers.saveKey(provider, key)
+        app.resetFailover()
         if (!state.value.live.running) app.providers.select(provider)
         _providerSheet.value = false
         _keySaved.value = provider

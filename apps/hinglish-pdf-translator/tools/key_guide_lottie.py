@@ -25,7 +25,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from onboarding_lottie import (  # noqa: E402
+from lottie_kit import (  # noqa: E402
     anim, composition, ellipse, fill, gradient, group, layer, path, rect, rgb, star, stroke, svg_shapes,
     text_shapes, trim,
 )

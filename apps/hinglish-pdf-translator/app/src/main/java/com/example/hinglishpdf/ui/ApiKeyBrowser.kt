@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Message
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -16,6 +18,11 @@ import androidx.annotation.RawRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -33,11 +40,12 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -48,6 +56,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +69,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.airbnb.lottie.compose.LottieAnimation
@@ -107,7 +118,7 @@ private val HINT_CLIP = LottieClipSpec.Progress(3f / 15f, 11.5f / 15f)
  * providers' key pages (an origin-restricted WebMessageListener), plus the
  * system clipboard. Sign-in cookies are kept for next time.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ApiKeyBrowser(
     provider: AIProvider,
@@ -124,6 +135,8 @@ fun ApiKeyBrowser(
     // Copied text that looks like a key but has an unknown shape: offered, not saved.
     var unknownKey by remember { mutableStateOf<String?>(null) }
     var captured by remember { mutableStateOf(false) }
+    // A sign-in popup ("Continue with Google" and the like), shown over the page.
+    var popup by remember { mutableStateOf<WebView?>(null) }
     val capture by rememberUpdatedState { text: String? ->
         if (!captured) {
             val found = ApiKeyDetector.detect(text, provider)
@@ -152,13 +165,30 @@ fun ApiKeyBrowser(
 
     Dialog(
         onDismissRequest = ::close,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnClickOutside = false,
+            decorFitsSystemWindows = false, // the content handles the keyboard and system bars itself
+        ),
     ) {
-        // Back goes back inside the website first, then closes the browser.
-        BackHandler { webView?.takeIf { it.canGoBack() }?.goBack() ?: close() }
+        // The window shrinks above the keyboard instead of hiding the page's text fields under it.
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect { dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE) }
+        val keyboardOpen = WindowInsets.isImeVisible
+
+        // Back closes a popup, then goes back inside the website, then closes the browser.
+        BackHandler {
+            val open = popup
+            when {
+                open != null -> if (open.canGoBack()) open.goBack() else popup = null
+                webView?.canGoBack() == true -> webView?.goBack()
+                else -> close()
+            }
+        }
         Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
                 TopAppBar(
+                    windowInsets = WindowInsets(0),
                     title = {
                         Column {
                             Text("${provider.displayName} API key", style = MaterialTheme.typography.titleMedium)
@@ -175,6 +205,13 @@ fun ApiKeyBrowser(
                         IconButton(onClick = ::close) { Icon(Icons.Filled.Close, contentDescription = "Close") }
                     },
                     actions = {
+                        // The video guide, right at the top: visible at once, never over the website.
+                        FilledTonalIconButton(onClick = { video = !video }) {
+                            Icon(
+                                if (video) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                                contentDescription = if (video) "Stop video tutorial" else "Watch video tutorial",
+                            )
+                        }
                         IconButton(onClick = { webView?.reload() }) { Icon(Icons.Filled.Refresh, contentDescription = "Reload") }
                         Box {
                             IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
@@ -196,10 +233,11 @@ fun ApiKeyBrowser(
                     LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
                 }
 
-                if (video) {
+                // While typing (Groq's sign-in form...), the header steps aside for the keyboard.
+                if (video && !keyboardOpen) {
                     // Watch and do: the guide on top, the website below.
                     VideoGuide(provider, Modifier.weight(1f).fillMaxWidth()) { video = false }
-                } else if (hint) {
+                } else if (hint && !keyboardOpen) {
                     HintStrip(provider) { hint = false }
                 }
 
@@ -212,6 +250,8 @@ fun ApiKeyBrowser(
                                 onProgress = { progress = it },
                                 onUrl = { url = it },
                                 onCopied = { capture(it) },
+                                onPopup = { popup = it },
+                                onPopupClosed = { popup = null },
                             ).also {
                                 it.loadUrl(provider.keyPageUrl)
                                 webView = it
@@ -219,13 +259,18 @@ fun ApiKeyBrowser(
                         },
                         onRelease = { it.destroy() },
                     )
-                    if (!video) {
-                        FloatingActionButton(
-                            onClick = { video = true },
-                            shape = RoundedCornerShape(50),
-                            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp),
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = "Watch video tutorial", modifier = Modifier.size(32.dp))
+                    popup?.let { window ->
+                        // The sign-in popup, over the page until it closes itself (or ✕).
+                        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { popup = null }) { Icon(Icons.Filled.Close, contentDescription = "Close sign-in window") }
+                                Text("🔐", style = MaterialTheme.typography.titleMedium)
+                            }
+                            AndroidView(
+                                factory = { window },
+                                modifier = Modifier.fillMaxSize(),
+                                onRelease = { it.destroy() },
+                            )
                         }
                     }
                 }
@@ -348,24 +393,31 @@ private const val COPY_WATCHER = """
 })();
 """
 
+/**
+ * The WebView's user agent without the marks that say "embedded WebView"
+ * ("; wv" and "Version/4.0"). Some sign-in pages (Google's among them) show a
+ * blank or refused page to embedded WebViews; this makes the page treat the
+ * in-app browser like Chrome on the same phone.
+ */
+fun browserUserAgent(webViewUserAgent: String): String = webViewUserAgent
+    .replace("; wv)", ")")
+    .replace(Regex("\\s?Version/\\d+(\\.\\d+)*"), "")
+    .replace(Regex("\\s{2,}"), " ")
+    .trim()
+
 @SuppressLint("SetJavaScriptEnabled") // the dashboards are JavaScript apps
 private fun createWebView(
     context: Context,
     onProgress: (Int) -> Unit,
     onUrl: (String) -> Unit,
     onCopied: (String) -> Unit,
+    onPopup: (WebView) -> Unit,
+    onPopupClosed: () -> Unit,
 ): WebView = WebView(context).apply {
-    settings.javaScriptEnabled = true
-    settings.domStorageEnabled = true
-    settings.loadWithOverviewMode = true
-    settings.useWideViewPort = true
-    settings.setSupportMultipleWindows(false) // "open in new tab" links stay in this view
-    // Only web pages: no access to the phone's files or content providers.
-    settings.allowFileAccess = false
-    settings.allowContentAccess = false
-    CookieManager.getInstance().setAcceptCookie(true)
-    // Sign-in flows hop between domains (e.g. a provider and its login service).
-    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+    configure(this)
+    // Sign-in popups (window.open: "Continue with Google"...) open as a second WebView over the page.
+    settings.setSupportMultipleWindows(true)
+    settings.javaScriptCanOpenWindowsAutomatically = true
 
     // Copy detection on the key pages only; the clipboard listener covers older WebViews.
     runCatching {
@@ -394,7 +446,39 @@ private fun createWebView(
     }
     webChromeClient = object : WebChromeClient() {
         override fun onProgressChanged(view: WebView, newProgress: Int) = onProgress(newProgress)
+
+        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+            val window = WebView(view.context).also(::configure)
+            window.webViewClient = WebViewClient()
+            window.webChromeClient = object : WebChromeClient() {
+                override fun onCloseWindow(closing: WebView) = onPopupClosed()
+            }
+            (resultMsg.obj as? WebView.WebViewTransport)?.webView = window
+            resultMsg.sendToTarget()
+            onPopup(window)
+            return true
+        }
+
+        override fun onCloseWindow(window: WebView) = onPopupClosed()
     }
+}
+
+/** Settings shared by the page and its sign-in popups. */
+@SuppressLint("SetJavaScriptEnabled")
+private fun configure(view: WebView) = with(view.settings) {
+    javaScriptEnabled = true
+    domStorageEnabled = true
+    @Suppress("DEPRECATION")
+    databaseEnabled = true
+    loadWithOverviewMode = true
+    useWideViewPort = true
+    userAgentString = browserUserAgent(userAgentString)
+    // Only web pages: no access to the phone's files or content providers.
+    allowFileAccess = false
+    allowContentAccess = false
+    CookieManager.getInstance().setAcceptCookie(true)
+    // Sign-in flows hop between domains (e.g. a provider and its login service).
+    CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
 }
 
 /** The clipboard's text, if any. */

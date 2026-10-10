@@ -1,4 +1,7 @@
-# Hindi Book Translator (Android)
+# BYOK Translator (Android)
+
+> **BYOK Model - 100% Free & Private Translation**: bring your own AI key;
+> the app adds no subscription, no markup and no server of its own.
 
 An Android app that translates whole books (PDFs and EPUBs) **from any
 language into any of 27 languages** (Hindi by default), in natural,
@@ -12,8 +15,12 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
 - **Modern, sense-for-sense:** one prompt for every language pair that asks
   for context first, everyday vocabulary (no Sanskritized Hindi, no archaic
   Spanish), adapted idioms, and untouched names and speaker labels.
-- **First-launch tutorial:** three swipeable slides (Compose HorizontalPager)
-  shown once, on the very first launch.
+- **First launch:** a "Select your Target Language" popup, then a spotlight
+  tour of the main screen (language → AI key → upload).
+- **Resilient:** each provider is paced for its free tier; a rate limit
+  pauses 60 s ("Pausing for 60s to refresh limit...") and retries by itself;
+  if a provider fails for good (no credit, bad key, daily quota), the book
+  carries on with another provider you have a key for.
 - **Any of four providers:** pick one from a dropdown; each has its own
   translator class (Strategy pattern) for its endpoint and JSON. **Get API
   Key** opens the provider's own key page inside the app; copy a key there,
@@ -37,7 +44,7 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
   is done, and a restart resumes at the first untranslated page.
 - **Terms of Use:** a disclaimer that must be accepted before the first
   translation, and always available from the ⋮ menu.
-- **Small:** ~7.8 MB APK, including the embedded Noto fonts and Lottie.
+- **Small:** ~7.7 MB APK, including the embedded Noto fonts and Lottie.
 
 Tech: Kotlin, Jetpack Compose (Material 3, downloadable Google Fonts), the
 providers' HTTPS streaming APIs (HttpURLConnection + Gson, no provider SDK),
@@ -97,10 +104,19 @@ or **Select PDF / EPUB** without a key) opens the settings sheet:
 Keys are kept per provider, only on the phone (app-private storage, excluded
 from backups), never in code or git.
 
-**Google sign-in inside apps:** Google blocks some sign-ins in embedded
-browsers ("This browser or app may not be secure"). Only for that case, the
-in-app browser's ⋮ menu has **Sign-in blocked? Open in browser**; copy the
-key there, come back and use the paste button.
+**Signing in inside the app:** the in-app browser sends the same user agent
+as Chrome on the phone (without the WebView's "; wv" mark, which Google and
+some other sign-in pages refuse or show blank), supports sign-in popups
+("Continue with Google" opens over the page, closes itself when done), keeps
+cookies, DOM storage and the database API on, and resizes above the keyboard
+(the hint and the video step aside while typing). If a sign-in is still
+refused, the browser's ⋮ menu has **Sign-in blocked? Open in browser**; the
+key copied there is saved when you come back.
+
+> Google's OAuth policy asks apps to sign users in through the system browser
+> (Custom Tabs), not an embedded WebView. Hiding the WebView mark works today
+> but Google may detect it or tighten the rule; the open-in-browser fallback
+> is the supported path if that happens.
 
 ### Gemini key at build time (optional)
 
@@ -172,7 +188,7 @@ cd apps/hinglish-pdf-translator
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~7.8 MB); sign
+`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~7.7 MB); sign
 it with your own key before installing.
 
 ## How it works
@@ -241,25 +257,21 @@ PDF mirrors lists and indents for right-to-left text, and the few words the
 app writes itself (Contents, Pages 1–20) are in Hindi for Hindi books and in
 English otherwise.
 
-### First-launch tutorial
+### First launch
 
-[`OnboardingScreen`](app/src/main/java/com/example/hinglishpdf/ui/onboarding/OnboardingScreen.kt)
-is a three-slide Compose `HorizontalPager` on the icon's deep-purple
-gradient, with the specified titles and texts:
+1. **"Select your Target Language"**: a popup with the 27 languages (native
+   names shown). Tapping one sets the **To** language on the main screen;
+   **Not now** keeps Hindi.
+2. **Spotlight tour** ([`FirstLaunch.kt`](app/src/main/java/com/example/hinglishpdf/ui/FirstLaunch.kt)):
+   the screen dims except one element at a time, with a pulsing ring and one
+   line of help: the **language** card → the **AI key** banner → the
+   **Select PDF / EPUB** button. A tap anywhere moves on; **Skip tour** ends
+   it. The list scrolls a target onto the screen when needed.
 
-| Slide | Title | Visual (looping Lottie animation) |
-|---|---|---|
-| 1 | Your Rules, Your Language | An open book flipping its pages while letters of seven scripts (A, अ, あ, ع, Ж, 中, அ) burst out of it |
-| 2 | Choose Your AI Engine | A glowing AI chip whose circuit traces send a pulse to each of four "engines" in turn |
-| 3 | Recommended AI Providers | A pulsing gold "recommended" badge with a rotating ring and twinkling sparkles; the three recommendations as cards, the "Don't worry..." note and the **Let's Get Started!** button |
-
-Next / page dots / Skip move through it; **Let's Get Started!** opens the
-main screen. A flag in SharedPreferences is written the moment the tutorial
-first appears, so it shows by itself only on the very first launch (also for
-people updating from an older version, once). It can be replayed from the ⋮
-menu → **Show the tutorial**. Every slide uses the same solid white button
-("Next", then "Let's Get Started!"), and **Skip** is large and bold with a
-48 dp touch target.
+Both show by themselves only on the very first launch (flags written in
+SharedPreferences the moment they appear; people updating see them once).
+The tour can be replayed from ⋮ → **Show the tutorial**. The main screen
+always starts with the **BYOK Model - 100% Free & Private Translation** badge.
 
 The key guides (`res/raw/key_guide_<provider>.json`, 15 s) and the success
 check (`key_saved.json`) are generated the same way by
@@ -268,11 +280,9 @@ drawings with each provider's real button wording, not screenshots of the
 websites (those change often and are not ours to ship); the hand and copy
 icons are Material Design icons (Apache 2.0).
 
-The three onboarding animations (`res/raw/onboarding_*.json`, 4-second loops,
-84 KB in all) are generated by [`tools/onboarding_lottie.py`](tools/onboarding_lottie.py):
-shapes, gradients and trim-path pulses written as Lottie JSON from code, with
-the letters taken as vector outlines from the Noto fonts (SIL Open Font
-License). No images and no third-party animation files; a unit test renders
+The animations are written as Lottie JSON from code with
+[`tools/lottie_kit.py`](tools/lottie_kit.py) (shapes, gradients, trim paths,
+letters as vector outlines from the Noto fonts, SIL OFL); a unit test renders
 frames of each to check they parse and draw.
 
 ### In-app reader
@@ -332,12 +342,15 @@ paces requests and handles errors as follows:
 
 | Situation | What the app does |
 |---|---|
-| Every chunk | A fixed pause after each translated chunk: **4.5 s** for Gemini and Groq (about 13 requests a minute, under Gemini's free 15), 1 s for OpenAI and Claude |
-| Rate limit (429) | Another model of the provider is tried first; if all are limited, **waits** (60 s for Gemini, 30 s Groq, 20 s OpenAI/Claude, or longer if the provider asks) and tries again, **with no retry limit**. The notification shows the provider's own message |
+| Every page (smart throttling) | A pause after each translated page, and the same minimum spacing between requests, sized for the free tiers: **OpenAI 20 s** (3 requests a minute), **Anthropic 12 s** (5), **Gemini 4 s** (15), **Groq 2 s** (30) |
+| Rate limit (429) | Another model of the provider is tried first; if all are limited, the book **pauses 60 s** (longer if the provider asks), showing **"Pausing for 42s to refresh limit..."** counting down, then retries by itself, **with no retry limit** |
 | "limit: 0" (no quota for this model and key) | The model is skipped for the session, like a retired one |
-| Daily quota used up | Stops the book with a clear message; **Resume** later continues at the same page |
-| Network drop, timeout, 5xx, overloaded, unreadable answer | Retried with backoff (15 s → 5 min), up to 8 times, then stops; **Resume** continues at the same page |
-| Invalid key, no billing credit, region, or no usable model | Stops with a message saying what to fix |
+| Network drop, timeout, 5xx, overloaded, unreadable answer | Retried with backoff (15 s → 5 min), up to 8 times |
+| Fails for good: no billing credit (402 / 429 "insufficient quota"), refused (401 / 403), region, no usable model, daily quota used up, or still failing after 8 retries | **Smart fallback**: if you have a key for another provider, the book switches to it and carries on with no page lost (Gemini first, then Groq, OpenAI, Anthropic; the app's selection follows, so the banner shows the engine at work). With no other key it stops with a message saying what to fix; **Resume** continues at the same page |
+
+Models need no setup: with the **Model** field empty, each provider's best
+default is used (and the next one if it is retired or limited). See
+[Which model](#which-model-automatic-fallback).
 
 **Pause** closes the open connection at once, even mid-answer.
 
@@ -425,9 +438,9 @@ app/
         │   └── translate/BlockChunker.kt Page → chunks of whole blocks
         └── ui/                           Compose screen + ViewModel, language card, status banner +
                                           provider settings sheet, in-app key browser, Terms dialog;
-                                          onboarding/ = tutorial (Lottie); reader/ = in-app reader,
-                                          fonts + Aa sheet
-tools/onboarding_lottie.py              Generates res/raw/onboarding_*.json
+                                          FirstLaunch (BYOK badge, language popup, spotlight tour);
+                                          reader/ = in-app reader, fonts + Aa sheet
+tools/lottie_kit.py                     Helpers for writing Lottie JSON from code
 tools/key_guide_lottie.py               Generates res/raw/key_guide_*.json and key_saved.json
 ```
 
@@ -436,9 +449,10 @@ tools/key_guide_lottie.py               Generates res/raw/key_guide_*.json and k
 - **Not yet run on a phone.** The build, lint, the unit tests (providers'
   requests and errors against a local server, fallback, prompt, parser,
   chunking, pagination, EPUB output validated with EPUBCheck, Room resume and
-  the version 1 → 2 migration, the tutorial and language pickers rendered with
-  Robolectric, the dashboard with the real ViewModel, the EPUB reader, the
-  Lottie animations rendered frame by frame) and
+  the version 1 → 2 migration, the language popup, the spotlight tour and the
+  dashboard rendered with Robolectric and the real ViewModel, the EPUB reader,
+  the Lottie animations rendered frame by frame, pacing, the 60 s countdown
+  and the provider failover with a fake AI) and
   live requests to all four providers' real endpoints (each correctly
   rejected a dummy key) pass. A real translation with a valid key, the in-app
   browser (including key capture on the real provider pages, which the tests
