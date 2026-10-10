@@ -39,9 +39,9 @@ import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.llm.Language
 
 /**
- * "From [Auto-Detect ▾] ⇄ To [Hindi ▾]": two pill buttons, each opening the
- * list of languages. Applies to books added from now on; each book keeps the
- * pair it was added with.
+ * Step 2, "From [Auto-Detect ▾] ⇄ To [Hindi ▾]": two pill buttons, each
+ * opening the list of languages. Applies to books added from now on; each
+ * book keeps the pair it was added with.
  */
 @Composable
 fun LanguageCard(
@@ -53,8 +53,8 @@ fun LanguageCard(
     modifier: Modifier = Modifier,
 ) {
     SectionCard(modifier) {
-        SectionLabel("Languages")
-        Spacer(Modifier.size(10.dp))
+        StepHeader(2, "Language")
+        Spacer(Modifier.size(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             LanguagePill("From", source, Language.sources, onSource, Modifier.weight(1f))
             // The swap button turns half a circle each time it is used.
@@ -73,19 +73,12 @@ fun LanguageCard(
             }
             LanguagePill("To", target, Language.targets, onTarget, Modifier.weight(1f))
         }
-        Spacer(Modifier.size(10.dp))
         if (source == target) {
+            Spacer(Modifier.size(10.dp))
             Text(
                 "From and To are the same language. Pick a different one.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-            )
-        } else {
-            Text(
-                "Natural, modern ${target.englishName}, the way people speak it today. " +
-                    "Books keep the languages they were added with.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

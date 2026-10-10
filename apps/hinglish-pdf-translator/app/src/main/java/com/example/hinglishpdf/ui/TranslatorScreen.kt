@@ -108,6 +108,8 @@ fun TranslatorScreen(
     val tab = AppTab.entries[tabIndex.coerceIn(0, AppTab.entries.lastIndex)]
     var showTextSettings by rememberSaveable { mutableStateOf(false) }
     var showTerms by rememberSaveable { mutableStateOf(false) }
+    /** "Your file's text will be sent to AI": asked before every file is chosen. */
+    var showConsent by rememberSaveable { mutableStateOf(false) }
     /** Runs once the Terms are accepted (the translation the user was starting). */
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     val providerSheet by viewModel.providerSheet.collectAsStateWithLifecycle()
@@ -180,6 +182,18 @@ fun TranslatorScreen(
                 showTerms = false
                 afterTerms = null
             },
+        )
+    }
+
+    if (showConsent) {
+        UploadConsentDialog(
+            provider = state.provider,
+            onAgree = {
+                showConsent = false
+                // Some file managers label EPUBs as generic binaries.
+                bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
+            },
+            onDismiss = { showConsent = false },
         )
     }
 
@@ -280,16 +294,13 @@ fun TranslatorScreen(
                             onSourceLanguage = viewModel::setSourceLanguage,
                             onTargetLanguage = viewModel::setTargetLanguage,
                             onSwapLanguages = viewModel::swapLanguages,
-                            onOutputFormat = viewModel::setOutputFormat,
                             onPick = {
                                 if (!state.configured) {
                                     viewModel.showProviderSheet(true)
                                     viewModel.showMessage("Add an API key first")
                                 } else {
-                                    withTerms {
-                                        // Some file managers label EPUBs as generic binaries.
-                                        bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
-                                    }
+                                    // The Terms once, then consent for this file, then the file picker.
+                                    withTerms { showConsent = true }
                                 }
                             },
                             onShowTerms = { afterTerms = null; showTerms = true },

@@ -3,19 +3,20 @@ package com.example.hinglishpdf.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -26,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,17 +38,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
-import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.llm.Language
 import com.example.hinglishpdf.ui.theme.brand
 
-/** Index of the Translate card in the dashboard (badge, engine, languages, format, translate...). */
-const val NEW_BOOK_ITEM = 4
+/** Index of the "Choose a book" step in the dashboard (badge, engine, language, book...). */
+const val NEW_BOOK_ITEM = 3
 
 /**
- * The Translate tab: the BYOK badge, the active AI engine, From / To, the
- * output format and the big "Select PDF / EPUB" action; below them, the book
- * being translated right now (or the latest one).
+ * The Translate tab, as three numbered steps: ① the AI engine, ② the
+ * language, ③ choose a book. Below them, the book being translated (or the
+ * latest one). Everything else lives in Library and Settings.
  */
 @Composable
 fun DashboardTab(
@@ -61,7 +60,6 @@ fun DashboardTab(
     onSourceLanguage: (Language) -> Unit,
     onTargetLanguage: (Language) -> Unit,
     onSwapLanguages: () -> Unit,
-    onOutputFormat: (DocFormat) -> Unit,
     onPick: () -> Unit,
     onShowTerms: () -> Unit,
     onOpenLibrary: () -> Unit,
@@ -70,18 +68,13 @@ fun DashboardTab(
         state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Keep the order: NEW_BOOK_ITEM is the index of the Translate card.
+        // Keep the order: NEW_BOOK_ITEM is the index of the "Choose a book" step.
         item(key = "byok") { ByokBadge() }
 
         item(key = "status") {
-            ApiStatusBanner(
-                settings = state.providers,
-                activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
-                onClick = onConfigure,
-                modifier = Modifier.spotlightTarget(targets, TourStep.API_KEY),
-            )
+            EngineStep(state, onConfigure, Modifier.spotlightTarget(targets, TourStep.API_KEY))
         }
 
         item(key = "languages") {
@@ -95,18 +88,31 @@ fun DashboardTab(
             )
         }
 
-        item(key = "format") { OutputFormatCard(state.outputFormat, onOutputFormat) }
-
-        // The main action, right below the output format.
         item(key = "new") {
-            NewBookCard(
-                target = state.targetLanguage.englishName,
-                buttonModifier = Modifier.spotlightTarget(targets, TourStep.UPLOAD),
-                enabled = state.languagesValid && !state.importing,
-                importing = state.importing,
-                onPick = onPick,
-                onShowTerms = onShowTerms,
-            )
+            SectionCard {
+                StepHeader(3, "Choose a book")
+                Spacer(Modifier.height(12.dp))
+                GradientButton(
+                    text = if (state.importing) "Opening…" else "Select PDF / EPUB",
+                    icon = Icons.Filled.UploadFile,
+                    onClick = onPick,
+                    enabled = state.languagesValid && !state.importing,
+                    modifier = Modifier.spotlightTarget(targets, TourStep.UPLOAD),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Translated into ${state.targetLanguage.englishName} in the background, page by page. " +
+                        "You'll be asked before anything is sent to ${state.provider.displayName}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Terms of Use",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clip(MaterialTheme.shapes.small).clickable(onClick = onShowTerms),
+                )
+            }
         }
 
         val running = state.books.firstOrNull { state.isRunning(it.book) }
@@ -127,77 +133,60 @@ fun DashboardTab(
     }
 }
 
-/** "Output Format: ( PDF | EPUB )": what Export and Read write. */
+/** "①  AI engine": a numbered circle and the step's name. */
 @Composable
-private fun OutputFormatCard(format: DocFormat, onSelect: (DocFormat) -> Unit) {
-    SectionCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Output Format:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "For Export and the reader",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            PillToggle(
-                options = listOf(DocFormat.PDF, DocFormat.EPUB),
-                selected = format,
-                label = { it.name },
-                onSelect = onSelect,
-                modifier = Modifier.width(168.dp),
-            )
+fun StepHeader(number: Int, title: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(26.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("$number", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
         }
+        Spacer(Modifier.width(10.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
+/**
+ * Step 1: the AI engine in use with a green "Connected" light, or, with no
+ * key yet, "⚠️ API Key Required - Tap to Configure". Tapping it opens the
+ * provider and key sheet.
+ */
 @Composable
-private fun NewBookCard(
-    target: String,
-    buttonModifier: Modifier = Modifier,
-    enabled: Boolean,
-    importing: Boolean,
-    onPick: () -> Unit,
-    onShowTerms: () -> Unit,
-) {
-    // The focal point of the screen: a hero card washed in the brand colours.
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        shadowElevation = 4.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            Modifier.background(MaterialTheme.brand.heroWash).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                GradientIcon(Icons.AutoMirrored.Filled.MenuBook, size = 44.dp)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    "Translate a book into $target",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+private fun EngineStep(state: TranslatorUiState, onConfigure: () -> Unit, modifier: Modifier) {
+    val brand = MaterialTheme.brand
+    val configured = state.configured
+    SectionCard(modifier = modifier, onClick = onConfigure) {
+        StepHeader(1, "AI engine")
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                if (configured) {
+                    Text(state.provider.displayName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(brand.success)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Connected", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    Text(
+                        "⚠️ API Key Required - Tap to Configure",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Free with Google Gemini. Takes a minute.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            Text(
-                "Pick a PDF or EPUB. Every heading, paragraph and list is translated in place, " +
-                    "page by page, in the background.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            GradientButton(
-                text = if (importing) "Opening…" else "Select PDF / EPUB",
-                icon = Icons.Filled.UploadFile,
-                onClick = onPick,
-                enabled = enabled,
-                modifier = buttonModifier,
-            )
-            Text(
-                "For personal use, with documents you have the rights to. Terms of Use",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clip(MaterialTheme.shapes.small).clickable(onClick = onShowTerms),
-            )
+            if (configured) {
+                TextButton(onClick = onConfigure) { Text("Change") }
+            } else {
+                Button(onClick = onConfigure) { Text("Set up") }
+            }
         }
     }
 }
@@ -216,7 +205,7 @@ private fun CurrentBookCard(
     val book = entry.book
     SectionCard {
         SectionLabel(if (running) "Now translating" else "Latest book")
-        Spacer(Modifier.size(8.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             book.title,
             style = MaterialTheme.typography.titleMedium,
@@ -224,29 +213,24 @@ private fun CurrentBookCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text(
-            "${book.fromLanguage.englishName} → ${book.toLanguage.englishName}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.size(10.dp))
+        Spacer(Modifier.height(10.dp))
         if (book.pageCount > 0) {
             GradientProgress(entry.translatedPages.toFloat() / book.pageCount)
         } else if (running) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        Spacer(Modifier.size(6.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             liveLabel ?: "${entry.translatedPages} of ${book.pageCount.takeIf { it > 0 } ?: "?"} ${book.unitName}s",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         livePage?.let { live ->
-            Spacer(Modifier.size(8.dp))
+            Spacer(Modifier.height(8.dp))
             LiveCard(live, book.unitName.replaceFirstChar { it.uppercase() }, compact = true)
         }
-        Spacer(Modifier.size(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             when {
                 running -> OutlinedButton(onClick = actions.onPause) {
                     Icon(Icons.Filled.Pause, contentDescription = null)
@@ -265,11 +249,7 @@ private fun CurrentBookCard(
                 }
             }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onOpenLibrary) {
-                Text("Library")
-                Spacer(Modifier.width(4.dp))
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
+            TextButton(onClick = onOpenLibrary) { Text("All books") }
         }
     }
 }

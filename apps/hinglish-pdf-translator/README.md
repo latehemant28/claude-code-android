@@ -25,21 +25,28 @@ page, in the background, with the AI provider you choose: **Google Gemini**,
   translator class (Strategy pattern) for its endpoint and JSON. **Get API
   Key** opens the provider's own key page inside the app; copy a key there,
   close it, and the key is pasted for you.
-- **PDF or EPUB output:** an **Output Format: [ PDF | EPUB ]** toggle (EPUB
-  by default) decides what **Export** (to Downloads) writes, whatever the source.
+- **PDF or EPUB output:** an **Output format ( PDF | EPUB )** toggle in
+  Settings (EPUB by default) decides what **Save to Downloads** writes,
+  whatever the source.
 - **Structure kept:** headings, bullet points (with nesting), numbering and
   paragraph breaks are restored after translation.
 - **Model fallback:** a prioritized list of models per provider; a retired,
   out-of-quota or rate-limited model is swapped for the next one automatically.
-- **Three tabs:** **Translate** (the dashboard, titled **Bring your own
-  key**), **Library** and **Settings**, in a deep indigo / slate Material 3
-  theme with violet-to-pink accent gradients, light or dark with the phone.
-- **Dashboard:** the BYOK badge, the active **AI engine** card (status
-  light, model badge, chevron), pill-shaped From / To and PDF / EPUB
-  selectors, and the gradient **Select PDF / EPUB** button; below, the book
-  being translated, live.
-- **Library:** every book as a card with a progress bar and **Read**,
-  **Export** and **Delete**, plus a live preview of the translated pages.
+- **Simple, three tabs:** **Translate**, **Library** and **Settings**, in an
+  indigo / slate Material 3 theme, light or dark with the phone.
+- **Dashboard in three steps** (titled **Bring your own key**, under the
+  BYOK badge): **① AI engine** (the provider with a green "Connected" light,
+  or "Set up"), **② Language** (From / To), **③ Choose a book** (**Select
+  PDF / EPUB**); below, the book being translated, live.
+- **Consent before every upload:** choosing a file first shows **"Your
+  file's text will be sent to AI"**: which provider gets the text, that only
+  text is sent (pictures stay on the phone), that the provider's privacy
+  terms apply, and to avoid confidential documents. The file picker opens
+  only after ticking **"I agree to send this file's text to …"** and tapping
+  **Agree & choose file**.
+- **Library:** every book as a card with a progress bar and one main button
+  (**Read**, **Pause** or **Resume**); **Save to Downloads**, **Copy text**
+  and **Delete** are in its ⋮ menu.
 - **In-app reader:** opens a finished book inside the app (PDF pages with
   `PdfRenderer`, EPUB chapters in a local WebView), edge to edge, with bars
   that hide while you read, dark mode and gliding text size / zoom.
@@ -66,9 +73,9 @@ Android's `PdfDocument` for writing PDFs, and `java.util.zip` for EPUBs.
 
 ## Setup: pick a provider and add its API key
 
-The **AI engine** card at the top of the dashboard shows the provider in
-use with a green "Connected" light and the model in a badge, or, with no key
-saved, an amber **⚠️ API Key Required - Tap to Configure**. Tapping it (or a
+Step **① AI engine** on the dashboard shows the provider in use with a
+green "Connected" light, or, with no key saved, **⚠️ API Key Required - Tap
+to Configure** with a **Set up** button. Tapping it (or a
 provider under **Settings → Choose Your AI Engine**, or **Select PDF / EPUB**
 without a key) opens the settings sheet:
 
@@ -300,8 +307,8 @@ English otherwise.
    **Not now** keeps Hindi.
 2. **Spotlight tour** ([`FirstLaunch.kt`](app/src/main/java/com/example/hinglishpdf/ui/FirstLaunch.kt)):
    the screen dims except one element at a time, with a pulsing ring and one
-   line of help: the **language** card → the **AI key** banner → the
-   **Select PDF / EPUB** button. A tap anywhere moves on; **Skip tour** ends
+   line of help, in the order of the steps: the **AI key** → the
+   **language** → the **Select PDF / EPUB** button. A tap anywhere moves on; **Skip tour** ends
    it. The list scrolls a target onto the screen when needed.
 
 Both show by themselves only on the very first launch (flags written in
@@ -451,8 +458,8 @@ collects it on the main thread.
 
 ### Export: PDF or EPUB
 
-The **Output Format: ( PDF | EPUB )** toggle on the dashboard and in Settings (EPUB
-by default) decides what **Export** (in the Library), and the automatic save when a
+The **Output format ( PDF | EPUB )** toggle in Settings (EPUB
+by default) decides what **Save to Downloads** (the book's ⋮ menu in the Library), and the automatic save when a
 book finishes, write. Files go to **Downloads** through MediaStore, which
 needs no storage permission on Android 10+ (this app's minimum). Pages not
 translated yet keep their original text, so a paused book can be saved too.
@@ -516,9 +523,10 @@ app/
         │   └── translate/                BlockChunker (page → chunks of whole blocks),
         │                                 TranslationCheck (missing / cut-off / untranslated blocks)
         └── ui/                           TranslatorScreen (tabs, top bar, sheets) + ViewModel;
-                                          DashboardTab, LibraryTab, SettingsTab, Components (cards,
-                                          gradient button, pill toggle, progress); language card,
-                                          AI engine card + provider settings sheet, in-app key browser,
+                                          DashboardTab (3 steps), LibraryTab, SettingsTab, Components
+                                          (cards, gradient button, pill toggle, progress);
+                                          UploadConsentDialog; language card, provider settings
+                                          sheet, in-app key browser,
                                           Terms dialog; FirstLaunch (BYOK badge, language popup,
                                           spotlight tour); theme/ = indigo / slate palette and
                                           gradients; reader/ = in-app reader, fonts + Aa sheet

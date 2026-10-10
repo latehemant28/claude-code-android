@@ -1,12 +1,9 @@
 package com.example.hinglishpdf.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,19 +18,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,12 +44,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -69,11 +66,10 @@ import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
 import com.example.hinglishpdf.data.document.bulletFor
 import com.example.hinglishpdf.ui.reader.LocalReaderStyle
-import com.example.hinglishpdf.ui.theme.brand
 
 /**
  * The Library tab: every book as a card with its progress and quick actions
- * (Read, Export, Delete, Pause / Resume); the selected book's translated
+ * (Read, Pause / Resume; save, copy and delete in its menu); the selected book's translated
  * pages follow, with the page being written streaming in live.
  */
 @Composable
@@ -175,7 +171,11 @@ private fun EmptyLibrary(onTranslateBook: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * One book: title, languages, a progress bar and one main button (Read,
+ * Pause or Resume); the rarer actions (save to Downloads, copy, delete) are
+ * in the ⋮ menu.
+ */
 @Composable
 private fun BookCard(
     entry: BookWithProgress,
@@ -188,14 +188,12 @@ private fun BookCard(
     onDelete: () -> Unit,
 ) {
     val book = entry.book
-    val brand = MaterialTheme.brand
+    var menu by remember { mutableStateOf(false) }
     SectionCard(
         onClick = { actions.onSelect(book.id) },
         color = if (selected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            FormatTile(book.format)
-            Spacer(Modifier.width(12.dp))
+        Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 Text(
                     book.title,
@@ -205,21 +203,39 @@ private fun BookCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${book.fromLanguage.englishName} → ${book.toLanguage.englishName}",
+                    "${book.format.name} · ${book.fromLanguage.englishName} → ${book.toLanguage.englishName}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            val (label, color) = when {
-                running -> "Translating" to MaterialTheme.colorScheme.primary
-                book.status == BookStatus.COMPLETED -> "Done" to brand.success
-                book.status == BookStatus.FAILED -> "Stopped" to MaterialTheme.colorScheme.error
-                book.status == BookStatus.PAUSED -> "Paused" to brand.warning
-                else -> "Waiting" to MaterialTheme.colorScheme.outline
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More actions") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (entry.translatedPages > 0) {
+                        DropdownMenuItem(
+                            text = { Text("Save ${exportFormat.name} to Downloads") },
+                            leadingIcon = { Icon(Icons.Filled.FileDownload, contentDescription = null) },
+                            onClick = { menu = false; actions.onExport(book) },
+                        )
+                    }
+                    // Copies the pages shown below, so only for the selected book.
+                    if (selected && entry.translatedPages > 0) {
+                        DropdownMenuItem(
+                            text = { Text("Copy text") },
+                            leadingIcon = { Icon(Icons.Filled.ContentCopy, contentDescription = null) },
+                            onClick = { menu = false; actions.onCopy() },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = if (running) Color.Unspecified else MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        enabled = !running,
+                        onClick = { menu = false; onDelete() },
+                    )
+                }
             }
-            InfoBadge(label, container = color.copy(alpha = 0.16f), content = color)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         val total = book.pageCount
         if (total > 0) {
             GradientProgress(entry.translatedPages.toFloat() / total)
@@ -228,102 +244,43 @@ private fun BookCard(
         }
         Spacer(Modifier.height(6.dp))
         val unit = book.unitName
-        Row {
-            Text(
-                "${entry.translatedPages} of ${total.takeIf { it > 0 } ?: "?"} ${unit}s",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            if (total > 0) {
-                Text(
-                    "${entry.translatedPages * 100 / total}%",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-        val detail = liveLabel ?: when (book.status) {
+        val status = liveLabel ?: when (book.status) {
             BookStatus.QUEUED -> "Waiting to start"
             BookStatus.READING -> "Reading ${unit}s…"
-            BookStatus.TRANSLATING -> "Interrupted: resumes at the next untranslated $unit"
-            BookStatus.PAUSED -> null
-            BookStatus.COMPLETED -> book.outputName?.let { "Saved to Downloads: $it" }
+            BookStatus.TRANSLATING -> "Interrupted: tap Resume"
+            BookStatus.PAUSED -> "Paused"
+            BookStatus.COMPLETED -> "Done"
             BookStatus.FAILED -> "Stopped: ${book.error}"
         }
-        detail?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            when {
-                running -> OutlinedButton(onClick = actions.onPause) {
-                    Icon(Icons.Filled.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Pause")
-                }
-                book.status != BookStatus.COMPLETED -> FilledTonalButton(onClick = { actions.onResume(book) }) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Resume")
-                }
+        Text(
+            "${entry.translatedPages} of ${total.takeIf { it > 0 } ?: "?"} ${unit}s · $status",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(10.dp))
+        when {
+            running -> OutlinedButton(onClick = actions.onPause, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Pause")
             }
-            if (book.status == BookStatus.COMPLETED) {
-                Button(onClick = { actions.onRead(book) }, enabled = !opening) {
-                    Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (opening) "Opening…" else "Read")
-                }
+            book.status == BookStatus.COMPLETED -> Button(
+                onClick = { actions.onRead(book) },
+                enabled = !opening,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (opening) "Opening…" else "Read")
             }
-            if (entry.translatedPages > 0) {
-                FilledTonalButton(onClick = { actions.onExport(book) }) {
-                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Export ${exportFormat.name}")
-                }
-            }
-            if (!running) {
-                OutlinedButton(
-                    onClick = onDelete,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
-                ) {
-                    Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Delete")
-                }
-            }
-            if (selected && entry.translatedPages > 0) {
-                IconButton(onClick = actions.onCopy) { Icon(Icons.Filled.ContentCopy, contentDescription = "Copy text") }
+            else -> FilledTonalButton(onClick = { actions.onResume(book) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Resume")
             }
         }
-    }
-}
-
-/** "PDF" / "EPUB" on a small coloured tile, like a file icon. */
-@Composable
-private fun FormatTile(format: DocFormat) {
-    Box(
-        Modifier
-            .size(width = 44.dp, height = 52.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                if (format == DocFormat.PDF) MaterialTheme.brand.accent else Brush.linearGradient(
-                    listOf(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.primary),
-                ),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(format.name, color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
     }
 }
 

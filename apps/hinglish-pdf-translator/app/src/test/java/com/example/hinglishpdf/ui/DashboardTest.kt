@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -53,6 +55,17 @@ class DashboardTest {
         }
     }
 
+    /** Dialogs have their own window: draws the latest one. */
+    private fun screenshotDialog(name: String) {
+        compose.waitForIdle()
+        val view = org.robolectric.shadows.ShadowDialog.getLatestDialog().window!!.decorView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
+        File(File("build/screenshots").apply { mkdirs() }, "$name.png").outputStream().use {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
     private fun addFinishedBook() {
         val app = ApplicationProvider.getApplicationContext<HinglishApp>()
         app.preferences.acceptTerms()
@@ -80,15 +93,14 @@ class DashboardTest {
             }
         }
 
-        // The dashboard: its title, the badge, and the engine card asking for a key.
+        // The dashboard: its title, the badge, and three numbered steps, all on one screen.
         compose.onNodeWithText(DASHBOARD_TITLE).assertIsDisplayed()
         compose.onNodeWithText(BYOK_BADGE_TEXT).assertIsDisplayed()
         compose.onNodeWithText("⚠️ API Key Required - Tap to Configure").assertIsDisplayed()
         compose.onNodeWithText("Model (optional)").assertDoesNotExist()
-        // "Translate a book" sits right below the Output Format card.
-        val format = compose.onNodeWithText("Output Format:").fetchSemanticsNode().boundsInRoot
-        val translate = compose.onNodeWithText("Translate a book into Hindi").fetchSemanticsNode().boundsInRoot
-        assertTrue("$format / $translate", translate.top > format.bottom && translate.top - format.bottom < 320)
+        listOf("AI engine", "Language", "Choose a book", "Select PDF / EPUB").forEach {
+            compose.onNodeWithText(it).assertIsDisplayed()
+        }
         listOf("Translate", "Library", "Settings").forEach { tab(it).assertIsDisplayed() }
         screenshot("dashboard-no-key")
 
@@ -102,7 +114,7 @@ class DashboardTest {
         compose.onNodeWithText("Model (optional)").assertIsDisplayed()
         screenshot("provider-sheet-advanced")
 
-        // With a key: the provider, a green "Connected" light and the model badge.
+        // With a key: the provider and a green "Connected" light.
         compose.runOnUiThread {
             vm.saveApiKey(AIProvider.GROQ, "gsk_" + "x".repeat(40))
             vm.selectProvider(AIProvider.GROQ)
@@ -110,20 +122,30 @@ class DashboardTest {
         compose.waitForIdle()
         compose.onNodeWithText("Groq").assertIsDisplayed()
         compose.onNodeWithText("Connected").assertIsDisplayed()
-        compose.onNodeWithText("Auto · llama-3.3-70b-versatile").assertIsDisplayed()
         screenshot("dashboard-ready")
+
+        // Choosing a file first asks for consent to send its text to the AI.
+        compose.onNodeWithText("Select PDF / EPUB").performClick()
+        compose.onNodeWithText("Your file's text will be sent to AI").assertIsDisplayed()
+        compose.onNodeWithText("Agree & choose file").assertIsNotEnabled()
+        screenshotDialog("upload-consent")
+        compose.onNodeWithText(uploadConsentText(AIProvider.GROQ)).performClick()
+        compose.onNodeWithText("Agree & choose file").assertIsEnabled().performClick()
+        val picker = org.robolectric.Shadows.shadowOf(compose.activity).nextStartedActivity
+        assertEquals(android.content.Intent.ACTION_OPEN_DOCUMENT, picker?.action)
+        compose.onNodeWithText("Your file's text will be sent to AI").assertDoesNotExist()
         compose.onNode(hasScrollAction()).performScrollToKey("current")
         compose.onNodeWithText("Read Now").assertIsDisplayed()
         screenshot("dashboard-latest-book")
 
-        // Library: the book as a card with its progress and quick actions.
+        // Library: the book as a card with its progress, one main button and a ⋮ menu.
         tab("Library").performClick()
         compose.onNodeWithText("1 book · 1 translated").assertIsDisplayed()
-        compose.onNodeWithText("100%").assertIsDisplayed()
+        compose.onNodeWithText("1 of 1 pages · Done").assertIsDisplayed()
         compose.onNodeWithText("Read").assertIsDisplayed()
-        compose.onNodeWithText("Export EPUB").assertIsDisplayed()
-        compose.onNodeWithText("Delete").assertIsDisplayed()
         screenshot("library")
+        compose.onNodeWithContentDescription("More actions").performClick()
+        compose.onNodeWithText("Save EPUB to Downloads").assertIsDisplayed()
         compose.onNodeWithText("Delete").performClick()
         compose.onNodeWithText("Delete “Cold Morning”?").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()

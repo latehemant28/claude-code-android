@@ -8,10 +8,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.ui.graphics.compositeOver
-import com.example.hinglishpdf.ui.theme.brand
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.ModalBottomSheet
@@ -23,7 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import com.example.hinglishpdf.data.ai.ApiKeyDetector
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,81 +56,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.settings.ProviderSettings
-
-/**
- * The active AI engine, front and centre on the dashboard: the provider with
- * a status light ("Connected" or a highlighted "⚠️ API Key Required - Tap to
- * Configure"), the model in a badge, and a chevron. Tapping it opens
- * [ProviderSettingsSheet].
- */
-@Composable
-fun ApiStatusBanner(
-    settings: ProviderSettings.State,
-    activeModel: String?,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val configured = settings.configured
-    val provider = settings.provider
-    val brand = MaterialTheme.brand
-    SectionCard(
-        modifier = modifier,
-        onClick = onClick,
-        // No key yet: a warm amber wash rather than an error red, in light and dark alike.
-        color = if (configured) {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        } else {
-            brand.warning.copy(alpha = 0.16f).compositeOver(MaterialTheme.colorScheme.surfaceContainerLow)
-        },
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            GradientIcon(Icons.Filled.Memory, size = 48.dp)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "AI ENGINE",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                if (configured) {
-                    Text(provider.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusDot(brand.success)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Connected", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(8.dp))
-                        InfoBadge(
-                            activeModel?.substringAfter(" · ")
-                                ?: settings.customModel(provider).ifBlank { "Auto · ${provider.defaultModels.first()}" },
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
-                } else {
-                    Text(
-                        "⚠️ API Key Required - Tap to Configure",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusDot(brand.warning)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Choose an AI provider and add its key",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Icon(
-                Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
 
 /**
  * "AI provider & API key": the provider dropdown, "Get API Key" (the

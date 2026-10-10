@@ -140,8 +140,8 @@ fun TargetLanguageDialog(current: Language, onSelect: (Language) -> Unit, onDism
 
 /** The main screen's tour, one highlighted element at a time. */
 enum class TourStep(val title: String, val text: String) {
-    LANGUAGE("🌐 Your language", "Choose the language your book should be translated into."),
     API_KEY("🔑 Your AI key", "Tap here to connect a free AI engine. It takes a minute and stays on your phone."),
+    LANGUAGE("🌐 Your language", "Choose the language your book should be translated into."),
     UPLOAD("📚 Your book", "Then tap here to pick a PDF or EPUB. That's it!"),
 }
 

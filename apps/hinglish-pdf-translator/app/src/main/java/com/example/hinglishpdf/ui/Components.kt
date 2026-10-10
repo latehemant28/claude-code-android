@@ -39,7 +39,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -164,26 +163,6 @@ fun <T> PillToggle(
 fun StatusDot(color: Color, modifier: Modifier = Modifier) {
     Box(modifier.size(14.dp).clip(CircleShape).background(color.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-    }
-}
-
-/** A small rounded label, e.g. the model name or a book's format. */
-@Composable
-fun InfoBadge(
-    text: String,
-    modifier: Modifier = Modifier,
-    container: Color = MaterialTheme.colorScheme.primaryContainer,
-    content: Color = MaterialTheme.colorScheme.onPrimaryContainer,
-) {
-    Surface(shape = RoundedCornerShape(8.dp), color = container, contentColor = content, modifier = modifier) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-        )
     }
 }
 
