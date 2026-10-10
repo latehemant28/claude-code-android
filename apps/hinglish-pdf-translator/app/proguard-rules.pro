@@ -10,3 +10,8 @@
 # reflectively: keep the stored model classes intact.
 -keep class com.example.hinglishpdf.data.document.DocBlock { *; }
 -keep enum com.example.hinglishpdf.data.document.BlockKind { *; }
+
+# The pipeline's placeholder tags and PDF text styles are stored the same way.
+-keep class com.example.hinglishpdf.pipeline.segment.PlaceholderTag { *; }
+-keep enum com.example.hinglishpdf.pipeline.segment.PlaceholderTag$Kind { *; }
+-keep class com.example.hinglishpdf.pipeline.segment.TextStyle { *; }

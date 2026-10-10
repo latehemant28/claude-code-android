@@ -9,9 +9,10 @@ plugins {
 }
 
 /**
- * The Gemini API key is read from local.properties (git-ignored, never
- * committed) and compiled into BuildConfig.GEMINI_API_KEY, so it never
- * appears in the source code:
+ * An optional Gemini API key is read from local.properties (git-ignored,
+ * never committed), or else from the GEMINI_API_KEY environment variable,
+ * and compiled into BuildConfig.GEMINI_API_KEY, so it never appears in the
+ * source code (keys typed in the app are stored on the phone instead):
  *
  *   GEMINI_API_KEY=my_actual_key_here
  */
@@ -19,7 +20,8 @@ val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.isFile) file.inputStream().use { load(it) }
 }
-val geminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY", "").trim()
+// local.properties first, then the GEMINI_API_KEY environment variable (for CI and build scripts).
+val geminiApiKey: String = (localProperties.getProperty("GEMINI_API_KEY") ?: System.getenv("GEMINI_API_KEY")).orEmpty().trim()
 
 android {
     namespace = "com.example.hinglishpdf"
@@ -30,8 +32,8 @@ android {
         // Android 10+: MediaStore saves to Downloads without any storage permission.
         minSdk = 29
         targetSdk = 35
-        versionCode = 18
-        versionName = "4.1"
+        versionCode = 19
+        versionName = "4.2"
 
         // Quotes and backslashes escaped so any key is a valid Java string literal.
         val escapedKey = geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -71,6 +73,11 @@ android {
             excludes += "org/bouncycastle/pqc/**"
         }
     }
+}
+
+// Room writes each database version's schema here, so migrations can be checked against it.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 kotlin {

@@ -85,7 +85,9 @@ Chrome, come back and use the paste button.
 
 ### Gemini key at build time (optional)
 
-A Gemini key can also be compiled in from `local.properties` (git-ignored):
+A Gemini key can also be compiled in from `local.properties` (git-ignored),
+or from the `GEMINI_API_KEY` environment variable when `local.properties`
+has none:
 
 ```properties
 sdk.dir=/path/to/Android/sdk
@@ -298,6 +300,53 @@ translated. The acceptance (with its date) is saved on the phone; the
 background service also refuses to run a book until it is given. The text is
 always available from the ⋮ menu → **Terms of Use & Disclaimer**, and a link
 under "Select PDF / EPUB".
+
+## Pipeline (in progress)
+
+The app is being turned into a pipeline: Upload > Preflight > **Parser >
+Segmenter** > Analyzer > Prompt Builder > Translation Engine > Editor > QA >
+Rebuilder > Layout Verifier > Delivery. Phase 1 (parsing and segmentation,
+[`pipeline/`](app/src/main/java/com/example/hinglishpdf/pipeline)) is in
+place; translation still runs page by page as described above until the
+engine moves onto segments in Phase 2.
+
+- **Placeholders** ([`Placeholders.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/Placeholders.kt),
+  [`InlineCodec.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/InlineCodec.kt)):
+  inline tags become `{1}text{/1}`, elements without text `[[IMG_3]]`,
+  `[[BR_4]]`, protected ones (`<code>`, `translate="no"`) `[[CODE_5]]`;
+  text that merely looks like a placeholder is protected as `[[TXT_n]]`.
+  Each tag's markup is stored, decoding rebuilds the exact original nodes,
+  and a translation with missing, extra, reordered or badly nested
+  placeholders is refused.
+- **Sentence segmenter** ([`SentenceSegmenter.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/SentenceSegmenter.kt)):
+  sentences with their paragraph as parent; no cut after abbreviations
+  (Mr., e.g., Fig. 3), initials, decimals, inside quoted dialogue, before a
+  lower-case word or inside a paired placeholder; ends at `. ! ? …` and the
+  danda `।`. Each segment stores its source reference and a SHA-256 hash
+  (placeholders renumbered, so repeated sentences match).
+- **EPUB** ([`EpubPackage.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/epub/EpubPackage.kt),
+  [`EpubParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/epub/EpubParser.kt)):
+  OPF, NCX and nav are read; chapter text comes from the XHTML DOM's text
+  nodes; the title metadata, TOC labels (NCX and nav) and image alt text are
+  translatable units too. Code, `<pre>`, scripts, styles, SVG, MathML and
+  `translate="no"` are skipped; CSS, images and fonts are never opened.
+  Source map: file + XPath (+ attribute). The rebuilder writes translations
+  back with their tags, sets `dc:language` / `xml:lang`, copies every other
+  file byte for byte, and its output passes EPUBCheck.
+- **PDF** ([`PdfParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfParser.kt),
+  [`PdfLayout.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfLayout.kt)):
+  each page's text layer is checked (no usable text but images = scanned;
+  a mostly scanned book stops with a "needs OCR" message); glyphs become
+  lines with box, font, size, bold and italic; running headers, footers and
+  page numbers are dropped; tables are found (one unit per cell); column
+  gutters give the reading order; headings, list items, footnotes (small
+  text at the bottom; superscript marks become `[[SUP_n]]`) and paragraphs
+  are rebuilt, with words hyphenated at line ends rejoined. Bold / italic
+  spans become placeholders. Source map: page + bounding box, per segment.
+- **Storage:** database version 2 adds `parsed_documents`, `paragraphs` and
+  `segments` (additive migration; existing books are untouched). Schemas are
+  exported to `app/schemas/`.
+- **OCR** (Google ML Kit, on the phone) comes after text-based PDFs.
 
 ## Project structure
 

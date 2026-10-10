@@ -12,6 +12,8 @@ import com.example.hinglishpdf.data.pdf.PdfTextExtractor
 import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.settings.AppPreferences
 import com.example.hinglishpdf.data.settings.ProviderSettings
+import com.example.hinglishpdf.pipeline.DocumentParser
+import com.example.hinglishpdf.pipeline.PipelineStore
 import com.example.hinglishpdf.service.Notifications
 import com.example.hinglishpdf.service.TranslationMonitor
 import com.example.hinglishpdf.ui.reader.ReaderSettingsStore
@@ -40,6 +42,10 @@ class HinglishApp : Application() {
     val preferences by lazy { AppPreferences(this) }
 
     val db by lazy { AppDatabase.create(this) }
+
+    /** The pipeline's parser (paragraphs, sentence segments, source map) and where its results are kept. */
+    val documentParser by lazy { DocumentParser(cacheDir) }
+    val pipelineStore by lazy { PipelineStore(db.pipelineDao()) }
     val translationRepository by lazy {
         TranslationRepository(
             model = AITranslator { chunk -> translator().translate(chunk) },

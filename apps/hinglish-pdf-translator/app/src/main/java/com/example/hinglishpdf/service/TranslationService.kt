@@ -15,6 +15,9 @@ import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.document.DocumentFormatter
 import com.example.hinglishpdf.data.PageEvent
+import com.example.hinglishpdf.data.pdf.PdfPasswordProtectedException
+import com.example.hinglishpdf.pipeline.NeedsOcrException
+import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +27,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Translates books in the background, page by page, with a persistent
@@ -96,6 +100,12 @@ class TranslationService : Service() {
             check(app.translatorConfigured) {
                 "No API key for ${app.providers.state.value.provider.displayName}. Paste one in the app, then tap Resume."
             }
+
+            // 0. The pipeline's parse, once per book: paragraphs, sentence segments,
+            // placeholders and the source map. A scanned PDF stops here (it needs
+            // OCR). Any other problem with the new parser is logged and the
+            // book carries on with the page-by-page translation below.
+            analyse(initial)
 
             // 1. Extract the pages once. Pages are stored in one transaction, so
             // an interrupted extraction leaves none and is simply redone; a
@@ -186,6 +196,33 @@ class TranslationService : Service() {
             val message = e.message ?: e.javaClass.simpleName
             books.setStatus(id, BookStatus.FAILED, message)
             Notifications.failed(this, initial.title, message)
+        }
+    }
+
+    private suspend fun analyse(book: BookEntity) {
+        val dao = app.db.pipelineDao()
+        val stored = dao.document(book.id)
+        if (stored == null) {
+            app.db.bookDao().setStatus(book.id, BookStatus.READING)
+            val parsed = try {
+                withContext(Dispatchers.IO) {
+                    app.documentParser.parse(File(book.sourcePath), book.format) { label, done, total ->
+                        app.monitor.update { it.copy(label = label) }
+                        if (done == total || done % 10 == 0) showProgress(book, label, done, total)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: PdfPasswordProtectedException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Pipeline parse of book ${book.id} failed; continuing without it", e)
+                return
+            }
+            app.pipelineStore.save(book.id, parsed)
+            if (parsed.needsOcr) throw NeedsOcrException(parsed.scannedPages.size, parsed.pageCount)
+        } else if (stored.needsOcr) {
+            throw NeedsOcrException(JsonParser.parseString(stored.scannedPages).asJsonArray.size(), stored.pageCount)
         }
     }
 
