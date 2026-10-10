@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -71,6 +72,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -93,7 +96,7 @@ import com.example.hinglishpdf.data.ai.AIProvider
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TranslatorScreen(viewModel: TranslatorViewModel) {
+fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit = {}) {
     // Both collected on the main thread; the heavy work behind them runs on Dispatchers.Default.
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pages by viewModel.pages.collectAsStateWithLifecycle()
@@ -106,6 +109,8 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     var browserFor by rememberSaveable { mutableStateOf<AIProvider?>(null) }
     var pastedKey by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -177,7 +182,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Book → Hindi") },
+                    title = { Text("Book → ${state.targetLanguage.englishName}") },
                     actions = {
                         // "Aa": font style and text size for the translated text.
                         IconButton(onClick = { showTextSettings = true }) {
@@ -190,12 +195,23 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(
+                                    text = { Text("AI provider & API key") },
+                                    onClick = {
+                                        showMenu = false
+                                        scope.launch { listState.animateScrollToItem(PROVIDER_ITEM) }
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Reading text style") },
                                     onClick = { showMenu = false; showTextSettings = true },
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Terms of Use & Disclaimer") },
                                     onClick = { showMenu = false; afterTerms = null; showTerms = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Show the tutorial") },
+                                    onClick = { showMenu = false; onShowTutorial() },
                                 )
                             }
                         }
@@ -205,10 +221,22 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Keep the order: PROVIDER_ITEM is the provider card's index (menu → scroll).
+                item(key = "languages") {
+                    LanguageCard(
+                        source = state.sourceLanguage,
+                        target = state.targetLanguage,
+                        onSource = viewModel::setSourceLanguage,
+                        onTarget = viewModel::setTargetLanguage,
+                        onSwap = viewModel::swapLanguages,
+                    )
+                }
+
                 item(key = "format") {
                     OutputFormatSelector(state.outputFormat, onSelect = viewModel::setOutputFormat)
                 }
@@ -230,6 +258,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 
                 item(key = "new") {
                     NewBookCard(
+                        target = state.targetLanguage.englishName,
                         enabled = state.canAddBook,
                         importing = state.importing,
                         onPick = {
@@ -309,6 +338,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
 
 @Composable
 private fun NewBookCard(
+    target: String,
     enabled: Boolean,
     importing: Boolean,
     onPick: () -> Unit,
@@ -316,7 +346,7 @@ private fun NewBookCard(
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Translate a book into Hindi", style = MaterialTheme.typography.titleSmall)
+            Text("Translate a book into $target", style = MaterialTheme.typography.titleSmall)
             Button(onClick = onPick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Filled.UploadFile, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
@@ -394,6 +424,11 @@ private fun BookCard(
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${book.fromLanguage.englishName} → ${book.toLanguage.englishName}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
             val unit = book.unitName
             val status = liveLabel ?: when (book.status) {
@@ -564,3 +599,5 @@ private fun BlockView(block: DocBlock, text: String, previous: DocBlock?) {
     }
 }
 
+/** Index of the provider card in the main list (languages, format, provider, ...). */
+private const val PROVIDER_ITEM = 2

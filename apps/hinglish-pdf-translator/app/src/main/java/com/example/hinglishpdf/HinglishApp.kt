@@ -42,7 +42,7 @@ class HinglishApp : Application() {
     val db by lazy { AppDatabase.create(this) }
     val translationRepository by lazy {
         TranslationRepository(
-            model = AITranslator { chunk -> translator().translate(chunk) },
+            model = AITranslator { systemPrompt, chunk -> translator().translate(systemPrompt, chunk) },
             // Paced for the provider selected now, so switching provider applies at once.
             chunkPauseMillis = { providers.state.value.provider.chunkPauseMillis },
             rateLimitWaitMillis = { providers.state.value.provider.rateLimitWaitMillis },

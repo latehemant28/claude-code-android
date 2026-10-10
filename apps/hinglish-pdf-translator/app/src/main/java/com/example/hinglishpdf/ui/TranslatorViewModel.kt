@@ -13,6 +13,7 @@ import com.example.hinglishpdf.data.db.BookWithProgress
 import com.example.hinglishpdf.data.db.PageEntity
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.document.DocFormat
+import com.example.hinglishpdf.data.llm.Language
 import com.example.hinglishpdf.data.settings.ProviderSettings
 import com.example.hinglishpdf.ui.reader.ReaderFont
 import com.example.hinglishpdf.ui.reader.ReaderStyle
@@ -43,6 +44,9 @@ data class TranslatorUiState(
     val activeModel: String? = null,
     /** What "Save to Downloads" writes. */
     val outputFormat: DocFormat = DocFormat.EPUB,
+    /** "From" / "To" for the next book added. */
+    val sourceLanguage: Language = Language.AUTO_DETECT,
+    val targetLanguage: Language = Language.HINDI,
     /** When the Terms of Use were accepted; null until then (no translation may start). */
     val termsAcceptedAt: Long? = null,
     val books: List<BookWithProgress> = emptyList(),
@@ -62,7 +66,10 @@ data class TranslatorUiState(
 
     val termsAccepted: Boolean get() = termsAcceptedAt != null
 
-    val canAddBook: Boolean get() = configured && !importing
+    /** From and To must differ (Auto-Detect can be anything). */
+    val languagesValid: Boolean get() = sourceLanguage != targetLanguage
+
+    val canAddBook: Boolean get() = configured && languagesValid && !importing
 
     fun isRunning(book: BookEntity) = live.running && live.bookId == book.id
 }
@@ -72,6 +79,7 @@ private data class Settings(
     val activeModel: String?,
     val outputFormat: DocFormat,
     val termsAcceptedAt: Long?,
+    val languages: Pair<Language, Language>,
 )
 
 /** The page in progress, ready to draw: finished blocks plus the streaming micro-chunk. */
@@ -111,6 +119,7 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         app.activeModel,
         app.preferences.outputFormat,
         app.preferences.termsAcceptedAt,
+        combine(app.preferences.sourceLanguage, app.preferences.targetLanguage, ::Pair),
         ::Settings,
     )
 
@@ -126,6 +135,8 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
             activeModel = s.activeModel,
             outputFormat = s.outputFormat,
             termsAcceptedAt = s.termsAcceptedAt,
+            sourceLanguage = s.languages.first,
+            targetLanguage = s.languages.second,
             books = books,
             selectedBookId = l.selectedBookId,
             live = live,
@@ -139,6 +150,8 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
             providers = app.providers.state.value,
             outputFormat = app.preferences.outputFormat.value,
             termsAcceptedAt = app.preferences.termsAcceptedAt.value,
+            sourceLanguage = app.preferences.sourceLanguage.value,
+            targetLanguage = app.preferences.targetLanguage.value,
         ),
     )
 
@@ -200,6 +213,21 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
 
     fun setOutputFormat(format: DocFormat) = app.preferences.setOutputFormat(format)
 
+    /** "From" for books added from now on (a book keeps the pair it was added with). */
+    fun setSourceLanguage(language: Language) = app.preferences.setSourceLanguage(language)
+
+    /** "To" for books added from now on. */
+    fun setTargetLanguage(language: Language) = app.preferences.setTargetLanguage(language)
+
+    /** ⇄: From becomes To and To becomes From (not possible from Auto-Detect). */
+    fun swapLanguages() {
+        val from = app.preferences.sourceLanguage.value
+        val to = app.preferences.targetLanguage.value
+        if (from == Language.AUTO_DETECT) return
+        app.preferences.setSourceLanguage(to)
+        app.preferences.setTargetLanguage(from)
+    }
+
     /** The user ticked the box and tapped "I Agree". */
     fun acceptTerms() = app.preferences.acceptTerms()
 
@@ -215,6 +243,9 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
                         title = imported.title,
                         format = imported.format,
                         sourcePath = imported.file.absolutePath,
+                        // The book keeps this pair even if the dropdowns change later.
+                        sourceLanguage = state.value.sourceLanguage.code,
+                        language = state.value.targetLanguage.code,
                     ),
                 )
                 local.update { it.copy(selectedBookId = id) }

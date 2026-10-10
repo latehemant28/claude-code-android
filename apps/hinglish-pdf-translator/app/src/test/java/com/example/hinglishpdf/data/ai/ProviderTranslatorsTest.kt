@@ -1,6 +1,7 @@
 package com.example.hinglishpdf.data.ai
 
-import com.example.hinglishpdf.data.llm.HinglishPrompt
+import com.example.hinglishpdf.data.llm.Language
+import com.example.hinglishpdf.data.llm.TranslationPrompt
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.first
@@ -97,10 +98,13 @@ class ProviderTranslatorsTest {
     @After
     fun stop() = server.close()
 
+    /** The system prompt every provider must send as its system instruction. */
+    private val SYSTEM = TranslationPrompt.system(Language.ENGLISH, Language.SPANISH)
+
     private fun sse(vararg events: String) = events.joinToString("") { "data: $it\n\n" }
 
     private fun answer(translator: AITranslator): String =
-        runBlocking { translator.translate("Hello world.").toList().joinToString("") }
+        runBlocking { translator.translate(SYSTEM, "Hello world.").toList().joinToString("") }
 
     private fun failure(translator: AITranslator): TranslatorException = try {
         answer(translator)
@@ -135,7 +139,7 @@ class ProviderTranslatorsTest {
         assertEquals("/v1beta/models/gemini-x:streamGenerateContent", r.path)
         assertEquals("alt=sse", r.query)
         assertEquals("gem-key", r.headers["x-goog-api-key"])
-        assertEquals(HinglishPrompt.SYSTEM_PROMPT, r.body["systemInstruction"].asJsonObject["parts"].asJsonArray[0].asJsonObject["text"].asString)
+        assertEquals(SYSTEM, r.body["systemInstruction"].asJsonObject["parts"].asJsonArray[0].asJsonObject["text"].asString)
         val content = r.body["contents"].asJsonArray[0].asJsonObject
         assertEquals("user", content["role"].asString)
         assertEquals("Hello world.", content["parts"].asJsonArray[0].asJsonObject["text"].asString)
@@ -213,7 +217,7 @@ class ProviderTranslatorsTest {
         assertTrue(r.body["stream"].asBoolean)
         val messages = r.body["messages"].asJsonArray.map { it.asJsonObject }
         assertEquals(listOf("system", "user"), messages.map { it["role"].asString })
-        assertEquals(HinglishPrompt.SYSTEM_PROMPT, messages[0]["content"].asString)
+        assertEquals(SYSTEM, messages[0]["content"].asString)
         assertEquals("Hello world.", messages[1]["content"].asString)
     }
 
@@ -330,7 +334,7 @@ class ProviderTranslatorsTest {
         assertEquals("sk-ant-test", r.headers["x-api-key"])
         assertEquals("2023-06-01", r.headers["anthropic-version"])
         assertEquals("claude-test", r.body["model"].asString)
-        assertEquals(HinglishPrompt.SYSTEM_PROMPT, r.body["system"].asString)
+        assertEquals(SYSTEM, r.body["system"].asString)
         assertTrue(r.body["max_tokens"].asInt >= 4_096)
         val message = r.body["messages"].asJsonArray.single().asJsonObject
         assertEquals("user", message["role"].asString)
@@ -381,7 +385,7 @@ class ProviderTranslatorsTest {
     fun `pausing stops a stalled stream at once`() {
         replies = { Reply(200, sse("""{"choices":[{"delta":{"content":"पहला"}}]}"""), hangAfter = true) }
         val started = System.nanoTime()
-        val first = runBlocking { withTimeout(10_000) { openAi().translate("x").first() } }
+        val first = runBlocking { withTimeout(10_000) { openAi().translate(SYSTEM, "x").first() } }
         assertEquals("पहला", first)
         assertTrue((System.nanoTime() - started) / 1_000_000 < 10_000)
     }

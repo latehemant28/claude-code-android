@@ -133,7 +133,7 @@ class TranslationService : Service() {
 
                 // The answer streams in; the page is saved only once complete.
                 var translations: List<String?> = emptyList()
-                app.translationRepository.translatePage(page.sourceBlocks).collect { event ->
+                app.translationRepository.translatePage(page.sourceBlocks, book.fromLanguage, book.toLanguage).collect { event ->
                     when (event) {
                         is PageEvent.ChunkStarted -> {
                             app.monitor.update {

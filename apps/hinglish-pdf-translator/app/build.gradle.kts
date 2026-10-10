@@ -30,8 +30,8 @@ android {
         // Android 10+: MediaStore saves to Downloads without any storage permission.
         minSdk = 29
         targetSdk = 35
-        versionCode = 7
-        versionName = "4.0"
+        versionCode = 8
+        versionName = "5.0"
 
         // Quotes and backslashes escaped so any key is a valid Java string literal.
         val escapedKey = geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -56,6 +56,8 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // Lets Compose UI tests capture real screenshots under Robolectric.
+        unitTests.all { it.systemProperty("robolectric.pixelCopyRenderMode", "hardware") }
     }
 
     buildFeatures {
@@ -120,6 +122,10 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+    // Compose UI tests on the JVM (Robolectric), e.g. the onboarding flow.
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     // The W3C EPUB validator: generated EPUBs must pass it.
     testImplementation("org.w3c:epubcheck:5.1.0")
 }

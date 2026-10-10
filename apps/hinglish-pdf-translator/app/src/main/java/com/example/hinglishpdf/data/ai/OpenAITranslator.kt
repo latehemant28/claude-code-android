@@ -1,6 +1,5 @@
 package com.example.hinglishpdf.data.ai
 
-import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
@@ -16,7 +15,7 @@ open class ChatCompletionsTranslator(
     model: String,
 ) : HttpStreamingTranslator(providerName, model) {
 
-    override fun request(chunk: String, temperature: Boolean) = Request(
+    override fun request(systemPrompt: String, chunk: String, temperature: Boolean) = Request(
         url = endpoint,
         headers = mapOf("Authorization" to "Bearer $apiKey"),
         body = jsonObject {
@@ -24,7 +23,7 @@ open class ChatCompletionsTranslator(
             add(
                 "messages",
                 JsonArray().apply {
-                    add(message("system", HinglishPrompt.SYSTEM_PROMPT))
+                    add(message("system", systemPrompt))
                     add(message("user", chunk))
                 },
             )

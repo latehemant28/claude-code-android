@@ -1,13 +1,19 @@
 # Hindi Book Translator (Android)
 
-An Android app that translates whole books (PDFs and EPUBs) into natural,
-conversational **Hindi in Devanagari** (हिंदी), the way modern urban Indians
-speak, page by page, in the background, with the AI provider you choose:
-**Google Gemini**, **OpenAI**, **Anthropic Claude** or **Groq**.
+An Android app that translates whole books (PDFs and EPUBs) **from any
+language into any of 27 languages** (Hindi by default), in natural,
+contemporary language, the way educated native speakers talk today, page by
+page, in the background, with the AI provider you choose: **Google Gemini**,
+**OpenAI**, **Anthropic Claude** or **Groq**.
 
-- **Context-aware:** adapts आप / तुम and the tone to the book's genre, uses
-  everyday English words written in Devanagari (ऑप्शन, प्लान) instead of
-  bookish Hindi, and keeps speaker labels, names and "Chapter 1" in English.
+- **From / To dropdowns:** "From: Auto-Detect / English / Hindi / ..." and
+  "To: Hindi / Spanish / French / ..."; each book keeps the pair it was added
+  with.
+- **Modern, sense-for-sense:** one prompt for every language pair that asks
+  for context first, everyday vocabulary (no Sanskritized Hindi, no archaic
+  Spanish), adapted idioms, and untouched names and speaker labels.
+- **First-launch tutorial:** three swipeable slides (Compose HorizontalPager)
+  shown once, on the very first launch.
 - **Any of four providers:** pick one from a dropdown; each has its own
   translator class (Strategy pattern) for its endpoint and JSON. **Get API
   Key** opens the provider's own key page inside the app; copy a key there,
@@ -25,7 +31,7 @@ speak, page by page, in the background, with the AI provider you choose:
   is done, and a restart resumes at the first untranslated page.
 - **Terms of Use:** a disclaimer that must be accepted before the first
   translation, and always available from the ⋮ menu.
-- **Small:** ~6.8 MB APK, including the embedded Noto fonts.
+- **Small:** ~6.9 MB APK, including the embedded Noto fonts.
 
 Tech: Kotlin, Jetpack Compose (Material 3, downloadable Google Fonts), the
 providers' HTTPS streaming APIs (HttpURLConnection + Gson, no provider SDK),
@@ -136,7 +142,7 @@ cd apps/hinglish-pdf-translator
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~6.8 MB); sign
+`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~6.9 MB); sign
 it with your own key before installing.
 
 ## How it works
@@ -159,15 +165,71 @@ Select PDF/EPUB ─► BookImporter.copyIn ─► Room: book (QUEUED) ─► Tra
   3. Output Format toggle: EpubWriter / EpubBook or PdfExporter ─► Downloads
 ```
 
-### The prompt
+### Languages and the prompt
 
-[`HinglishPrompt.SYSTEM_PROMPT`](app/src/main/java/com/example/hinglishpdf/data/llm/HinglishPrompt.kt)
-is the specified context-aware Hindi prompt, word for word (a unit test checks
-it). The specified text stopped before closing its `<examples>` tag, so the
-closing `</examples>` line was added. Every provider receives it as its
-**system prompt**, and each request carries only the chunk of text.
-Temperature is 0.2 (unless a model refuses one), and Gemini's safety filters
-are set to `BLOCK_NONE` so ordinary literature isn't refused mid-book.
+The **From** and **To** dropdowns at the top of the screen set the language
+pair for the next book added ([`Language.kt`](app/src/main/java/com/example/hinglishpdf/data/llm/Language.kt)):
+Auto-Detect (From only), English, Hindi, Spanish, French, German, Portuguese,
+Italian, Dutch, Russian, Turkish, Arabic, Urdu, Bengali, Marathi, Nepali,
+Gujarati, Punjabi, Tamil, Telugu, Kannada, Malayalam, Japanese, Korean,
+Chinese (Simplified), Indonesian, Vietnamese and Thai. ⇄ swaps them. The pair
+is saved with the book (database version 2 added a `sourceLanguage` column;
+books from earlier versions read as Auto-Detect → Hindi), so a book resumes
+in its own languages even if the dropdowns change.
+
+[`TranslationPrompt.TEMPLATE`](app/src/main/java/com/example/hinglishpdf/data/llm/TranslationPrompt.kt)
+is the specified prompt, word for word (a unit test compares it with the
+specified text, trailing spaces included):
+
+```
+You are a master literary and context-aware translator.
+Translate the following text from {sourceLanguage} to {targetLanguage}.
+
+CRITICAL TONE & STYLE RULES:
+1. CONTEXT FIRST, TRANSLATE SECOND: ...
+2. MODERN & CONVERSATIONAL: ...
+3. NATURAL FLOW: ...
+4. EMOTION SENSE-FOR-SENSE: ...
+
+FORMATTING RULES:
+1. STRICT RETENTION: ...
+2. DO NOT TRANSLATE TAGS: ...
+3. COMPLETENESS: ...
+```
+
+`TranslationRepository.translatePage(blocks, source, target)` fills in the
+book's languages (`TranslationPrompt.system`; Auto-Detect becomes "its
+original language (detect it automatically)") and every provider receives
+the result as its **system prompt**; each request carries only the chunk of
+text. Temperature is 0.2 (unless a model refuses one), and Gemini's safety
+filters are set to `BLOCK_NONE` so ordinary literature isn't refused mid-book.
+
+Exports follow the target language: the file is named "Book (Spanish).epub",
+the EPUB is labelled with the language code (`dir="rtl"` for Arabic and
+Urdu), Noto Sans Devanagari is embedded for Devanagari languages only, the
+PDF mirrors lists and indents for right-to-left text, and the few words the
+app writes itself (Contents, Pages 1–20) are in Hindi for Hindi books and in
+English otherwise.
+
+### First-launch tutorial
+
+[`OnboardingScreen`](app/src/main/java/com/example/hinglishpdf/ui/onboarding/OnboardingScreen.kt)
+is a three-slide Compose `HorizontalPager` on the icon's deep-purple
+gradient, with the specified titles and texts:
+
+| Slide | Title | Visual (animated, drawn in Compose) |
+|---|---|---|
+| 1 | Your Rules, Your Language | The app's PDF → अ artwork floating and tilting in 3D, with letters from ten scripts orbiting around it |
+| 2 | Choose Your AI Engine | A processor chip wired to Gemini, OpenAI, Claude and Groq; a pulse runs to each "engine" in turn |
+| 3 | Recommended AI Providers | A glowing "recommended" badge; the three recommendations as cards, the "Don't worry..." note and the **Let's Get Started!** button |
+
+Next / page dots / Skip move through it; **Let's Get Started!** opens the
+main screen. A flag in SharedPreferences is written the moment the tutorial
+first appears, so it shows by itself only on the very first launch (also for
+people updating from an older version, once). It can be replayed from the ⋮
+menu → **Show the tutorial**, and ⋮ → **AI provider & API key** jumps to the
+provider card. The visuals are drawn and animated in Compose instead of a
+Lottie file: no extra library and no third-party animation to license.
 
 ### Reading UI
 
@@ -293,23 +355,26 @@ app/
         │   ├── TranslationRepository.kt  Pacing, retries, page Flow (provider-independent)
         │   ├── ai/                       AITranslator strategies: Gemini, OpenAI, Groq, Anthropic;
         │   │                             AIProvider (key pages, models), FallbackTranslator
-        │   ├── llm/HinglishPrompt.kt     The Hindi system prompt + answer parser
-        │   ├── settings/                 Provider + keys, output format, Terms of Use acceptance
+        │   ├── llm/                      Language (From / To list), TranslationPrompt (prompt + answer parser)
+        │   ├── settings/                 Provider + keys, languages, output format, Terms, tutorial flag
         │   ├── db/                       Room: books, pages (PK = bookId + pageNumber), DAOs
         │   ├── pdf/                      PDFBox extraction + layout analysis per page
         │   ├── epub/                     EpubBook (read, translated copy), EpubWriter (new EPUB 3)
         │   ├── document/                 Import, blocks, PDF export (PdfExporter, PdfPaginator, BundledFonts)
         │   ├── export/BookExporter.kt    Writes the result to Downloads via MediaStore
         │   └── translate/BlockChunker.kt Page → chunks of whole blocks
-        └── ui/                           Compose screen + ViewModel, provider card, in-app key browser,
-                                          Terms dialog; reader/ = fonts + Aa sheet
+        └── ui/                           Compose screen + ViewModel, language and provider cards,
+                                          in-app key browser, Terms dialog; onboarding/ = tutorial;
+                                          reader/ = fonts + Aa sheet
 ```
 
 ## Limitations
 
 - **Not yet run on a phone.** The build, lint, the unit tests (providers'
   requests and errors against a local server, fallback, prompt, parser,
-  chunking, pagination, EPUB output validated with EPUBCheck, Room resume) and
+  chunking, pagination, EPUB output validated with EPUBCheck, Room resume and
+  the version 1 → 2 migration, the tutorial and language pickers rendered with
+  Robolectric) and
   live requests to all four providers' real endpoints (each correctly
   rejected a dummy key) pass. A real translation with a valid key, the in-app
   browser and the PDF rendering still need to be tried on a device.

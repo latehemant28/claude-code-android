@@ -150,6 +150,29 @@ class EpubWriterTest {
     }
 
     @Test
+    fun `a right-to-left translation is marked as such, with english labels`() {
+        val file = tmp.newFile("arabic.epub")
+        file.outputStream().use {
+            EpubWriter.write(
+                it, "كتاب", listOf(EpubWriter.Section(1, listOf(p("مرحبا بالعالم"))), EpubWriter.Section(2, emptyList())),
+                pageMarkers = true, language = "ar", rightToLeft = true,
+                labels = com.example.hinglishpdf.data.document.ExportLabels.ENGLISH,
+            )
+        }
+        ZipFile(file).use { zip ->
+            val chapter = zip.text("OEBPS/chapter-001.xhtml")
+            assertTrue(chapter.contains("""xml:lang="ar" lang="ar" dir="rtl""""))
+            assertTrue(zip.text("OEBPS/content.opf").contains("""page-progression-direction="rtl""""))
+            assertTrue(zip.text("OEBPS/content.opf").contains("<dc:language>ar</dc:language>"))
+            val nav = zip.text("OEBPS/nav.xhtml")
+            assertTrue(nav.contains("<h1>Contents</h1>"))
+            assertTrue(nav.contains(">Pages 1–2</a>"))
+        }
+        val (problems, log) = epubcheck(file)
+        assertEquals(log, 0, problems)
+    }
+
+    @Test
     fun `a book without headings is split every few pages`() {
         val many = (1..45).map { EpubWriter.Section(it, listOf(p("पेज $it"))) }
         val file = tmp.newFile("plain.epub")

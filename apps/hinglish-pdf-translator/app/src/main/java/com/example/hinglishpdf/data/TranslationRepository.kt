@@ -3,7 +3,8 @@ package com.example.hinglishpdf.data
 import com.example.hinglishpdf.data.ai.AITranslator
 import com.example.hinglishpdf.data.ai.TranslatorException
 import com.example.hinglishpdf.data.document.DocBlock
-import com.example.hinglishpdf.data.llm.HinglishPrompt
+import com.example.hinglishpdf.data.llm.Language
+import com.example.hinglishpdf.data.llm.TranslationPrompt
 import com.example.hinglishpdf.data.translate.BlockChunker
 import com.example.hinglishpdf.data.translate.TranslationUnit
 import kotlinx.coroutines.CoroutineDispatcher
@@ -66,9 +67,10 @@ class RequestPacer(
 /**
  * Translates ONE page with the selected AI provider: cuts it into chunks of
  * whole blocks (a normal page is a single request), sends each to the
- * [AITranslator] strategy (whose system instruction is the translator
- * prompt), streams the answer, and maps it back onto the page's headings,
- * bullets, numbering and paragraphs.
+ * [AITranslator] strategy with the dynamic system prompt
+ * ([TranslationPrompt.system], filled with the book's From / To languages),
+ * streams the answer, and maps it back onto the page's headings, bullets,
+ * numbering and paragraphs.
  *
  * Runs on [Dispatchers.Default]; collectors (the service, then the UI on the
  * main thread) only receive small events.
@@ -88,14 +90,19 @@ class TranslationRepository(
     private val rateLimitWaitMillis: () -> Long = { RATE_LIMIT_WAIT_MS },
 ) {
 
-    fun translatePage(blocks: List<DocBlock>): Flow<PageEvent> = flow {
+    fun translatePage(
+        blocks: List<DocBlock>,
+        source: Language = Language.AUTO_DETECT,
+        target: Language = Language.HINDI,
+    ): Flow<PageEvent> = flow {
+        val languages = Languages(source, target, TranslationPrompt.system(source, target))
         val result = arrayOfNulls<String>(blocks.size)
         val pieces = mutableMapOf<Int, MutableList<String>>()
         val chunks = BlockChunker.chunk(blocks)
 
         chunks.forEachIndexed { index, units ->
             emit(PageEvent.ChunkStarted(index + 1, chunks.size))
-            val translated = translateChunk(units, events = this, streamTokens = true)
+            val translated = translateChunk(units, languages, events = this, streamTokens = true)
 
             // Stitch: a block split across chunks is re-joined in order.
             units.forEachIndexed { i, unit ->
@@ -122,40 +129,53 @@ class TranslationRepository(
      */
     private suspend fun translateChunk(
         units: List<TranslationUnit>,
+        languages: Languages,
         events: FlowCollector<PageEvent>,
         streamTokens: Boolean,
     ): List<String?> {
         val raw = try {
-            request(HinglishPrompt.build(units), events, streamTokens)
+            request(languages.systemPrompt, TranslationPrompt.build(units), events, streamTokens)
         } catch (e: TranslatorException.Blocked) {
-            return if (units.size == 1) listOf(null) else translateInHalves(units, events)
+            return if (units.size == 1) listOf(null) else translateInHalves(units, languages, events)
         }
 
-        val results = HinglishPrompt.parse(raw, units).toMutableList()
-        if (units.size > 1 && results.all { it == null }) return translateInHalves(units, events)
+        val results = TranslationPrompt.parse(raw, units, languages.target).toMutableList()
+        if (units.size > 1 && results.all { it == null }) return translateInHalves(units, languages, events)
 
         units.forEachIndexed { i, unit ->
             if (units.size > 1 && results[i] == null) {
-                results[i] = translateChunk(listOf(unit), events, streamTokens = false).first()
+                results[i] = translateChunk(listOf(unit), languages, events, streamTokens = false).first()
             }
         }
         return results
     }
 
-    private suspend fun translateInHalves(units: List<TranslationUnit>, events: FlowCollector<PageEvent>): List<String?> {
+    private suspend fun translateInHalves(
+        units: List<TranslationUnit>,
+        languages: Languages,
+        events: FlowCollector<PageEvent>,
+    ): List<String?> {
         val half = units.size / 2
-        return translateChunk(units.subList(0, half), events, streamTokens = false) +
-            translateChunk(units.subList(half, units.size), events, streamTokens = false)
+        return translateChunk(units.subList(0, half), languages, events, streamTokens = false) +
+            translateChunk(units.subList(half, units.size), languages, events, streamTokens = false)
     }
 
+    /** The book's language pair and the system prompt built from it once per page. */
+    private class Languages(val source: Language, val target: Language, val systemPrompt: String)
+
     /** One AI request: paced, streamed, retried on rate limits and network errors. */
-    private suspend fun request(prompt: String, events: FlowCollector<PageEvent>, streamTokens: Boolean): String {
+    private suspend fun request(
+        systemPrompt: String,
+        prompt: String,
+        events: FlowCollector<PageEvent>,
+        streamTokens: Boolean,
+    ): String {
         var attempt = 0
         while (true) {
             pacer.awaitTurn()
             val out = StringBuilder()
             try {
-                model.translate(prompt).collect { piece ->
+                model.translate(systemPrompt, prompt).collect { piece ->
                     out.append(piece)
                     if (streamTokens) events.emit(PageEvent.Token(piece))
                 }

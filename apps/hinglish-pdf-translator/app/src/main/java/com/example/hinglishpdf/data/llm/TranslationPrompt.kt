@@ -4,43 +4,49 @@ import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.translate.TranslationUnit
 
 /**
- * The translation prompt (English → conversational Devanagari Hindi) and the
- * parser that maps Gemini's answer back onto the chunk's headings, bullets
- * and paragraphs.
+ * The translation prompt and the parser that maps the AI's answer back onto
+ * the chunk's headings, bullets and paragraphs.
  *
- * [SYSTEM_PROMPT] is embedded exactly as specified and set once as the
- * model's system instruction. Each request then carries only the chunk, as
- * plain Markdown, one block per paragraph (`## Heading`, `- bullet`,
- * `2. step`), so the answer can be matched back block by block.
+ * [system] fills the specified prompt with the book's From / To languages;
+ * it is sent as each provider's system prompt. Each request then carries
+ * only the chunk, as plain Markdown, one block per paragraph (`## Heading`,
+ * `- bullet`, `2. step`), so the answer can be matched back block by block.
  */
-object HinglishPrompt {
+object TranslationPrompt {
 
     /**
-     * Embedded exactly as specified (line breaks and spacing included). The
-     * specified text ended without closing the <examples> tag (it looks cut
-     * off), so the closing </examples> line is the one addition.
+     * Embedded exactly as specified, line for line (including the trailing
+     * spaces after "translator." and "archaic Spanish)."), with the
+     * {sourceLanguage} and {targetLanguage} placeholders.
      */
-    val SYSTEM_PROMPT = """
-        You are an expert, context-aware translator translating English books into natural, conversational Hindi using the Devanagari script (हिंदी). 
+    val TEMPLATE: String = listOf(
+        "You are a master literary and context-aware translator. ",
+        "Translate the following text from {sourceLanguage} to {targetLanguage}.",
+        "",
+        "CRITICAL TONE & STYLE RULES:",
+        "1. CONTEXT FIRST, TRANSLATE SECOND: Before translating, internally analyze the entire paragraph to grasp " +
+            "the underlying meaning, philosophy, and context. Ensure the core essence of the message is preserved.",
+        "2. MODERN & CONVERSATIONAL: Do NOT use rigid, archaic, or overly formal textbook vocabulary " +
+            "(e.g., avoid pure formal Sanskritized Hindi; avoid archaic Spanish). ",
+        "3. NATURAL FLOW: Translate the text using contemporary, everyday language—exactly how educated native " +
+            "speakers of {targetLanguage} converse in modern times.",
+        "4. EMOTION SENSE-FOR-SENSE: Translate sense-for-sense, not word-for-word. Adapt idioms and humor so they " +
+            "make sense in {targetLanguage} without losing the original meaning.",
+        "",
+        "FORMATTING RULES:",
+        "1. STRICT RETENTION: Maintain all original line breaks, bullet points, paragraphs, and markdown.",
+        "2. DO NOT TRANSLATE TAGS: Never translate character names, speaker labels, or structural tags. " +
+            "Leave them in their original script.",
+        "3. COMPLETENESS: Do not skip or summarize any part of the text. Return only the translated text, " +
+            "with zero conversational filler from your side.",
+    ).joinToString("\n")
 
-        <rules>
-        1. Script & Tone: Use the Devanagari script. Keep it casual, modern, and easy to read, exactly like how modern urban Indians speak.
-        2. Context-Awareness (Crucial): Analyze the genre and tone of the text. Automatically adapt the pronouns (आप vs तुम) and style based on the context (e.g., use 'आप' for philosophical/respectful dialogues, and 'तुम' for friendly/casual fiction).
-        3. Vocabulary: Do NOT use highly formal, pure, or academic Hindi words (avoid 'विकल्प', 'निर्णय', 'समावेश'). Use common English words written in Devanagari (e.g., 'ऑप्शन', 'डिसाइड', 'सिस्टम', 'प्लान'). You can also leave highly technical words in the English script.
-        4. Formatting & Labels: Maintain exact formatting, paragraphs, and bullet points. Do NOT translate speaker labels, character names, or structural tags (e.g., keep 'YOUTH:', 'PHILOSOPHER:', 'Chapter 1' exactly as they are in English).
-        5. Output: Output ONLY the translated text. Never add conversational filler, introductions, or explanations.
-        </rules>
+    /** The system prompt for a book translated from [source] (possibly Auto-Detect) into [target]. */
+    fun system(source: Language, target: Language): String = TEMPLATE
+        .replace("{sourceLanguage}", source.promptName)
+        .replace("{targetLanguage}", target.promptName)
 
-        <examples>
-        English: Believe me, he had no other option, so he decided to plan this.
-        Modern Hindi: मेरा यकीन मानिए, उसके पास कोई और ऑप्शन नहीं था, इसलिए उसने यह प्लान डिसाइड किया।
-
-        English: The system architecture is quite complex, but we can optimize the database queries easily.
-        Modern Hindi: सिस्टम आर्किटेक्चर थोड़ा कॉम्प्लेक्स है, लेकिन हम डेटाबेस क्वेरीज को आसानी से ऑप्टिमाइज़ कर सकते हैं।
-        </examples>
-    """.trimIndent()
-
-    /** The user message for one chunk: the chunk itself (the instructions are in [SYSTEM_PROMPT]). */
+    /** The user message for one chunk: the chunk itself (the instructions are in [system]). */
     fun build(units: List<TranslationUnit>): String = chunkText(units)
 
     /** The chunk as Markdown: one block per paragraph, original markers kept. */
@@ -65,8 +71,9 @@ object HinglishPrompt {
      * in smaller parts, so nothing is ever misaligned. A single-unit chunk
      * always gets the whole answer.
      */
-    fun parse(raw: String, units: List<TranslationUnit>): List<String?> {
-        val blocks = splitBlocks(stripFiller(raw))
+    fun parse(raw: String, units: List<TranslationUnit>, target: Language? = null): List<String?> {
+        val label = labelFor(target)
+        val blocks = splitBlocks(stripFiller(raw, label), label)
         if (units.size == 1) {
             val text = blocks.joinToString(" ") { stripMarker(it, units[0]) }.trim()
             return listOf(text.takeIf { it.isNotEmpty() })
@@ -77,20 +84,20 @@ object HinglishPrompt {
 
     /**
      * Removes what the model sometimes wraps around the translation: a code
-     * fence, echoed tags, a "Here is..." line, or a leading "Modern Hindi:"
-     * label (the prompt's examples use one). Speaker labels such as "YOUTH:"
-     * are part of the text and are kept.
+     * fence, echoed tags, a "Here is..." line, or a leading "Hindi:" /
+     * "Translation:" style label. Speaker labels such as "YOUTH:" are part of
+     * the text and are kept.
      */
-    private fun stripFiller(raw: String): String {
+    private fun stripFiller(raw: String, label: Regex): String {
         var text = raw.replace("\r\n", "\n").trim()
         text = text.replace(CODE_FENCE, "")
         text = text.replace(XML_TAG, "")
         text = text.trim().replace(PREAMBLE, "")
-        text = text.replace(LABEL, "")
+        text = text.replace(label, "")
         return text.trim()
     }
 
-    private fun splitBlocks(text: String): List<String> {
+    private fun splitBlocks(text: String, label: Regex): List<String> {
         val blocks = mutableListOf<String>()
         for (paragraph in text.split(BLANK_LINE)) {
             val current = StringBuilder()
@@ -102,7 +109,7 @@ object HinglishPrompt {
                     current.clear()
                 }
                 if (current.isNotEmpty()) current.append(' ')
-                current.append(trimmed.replace(LABEL, ""))
+                current.append(trimmed.replace(label, ""))
             }
             if (current.isNotEmpty()) blocks += current.toString()
         }
@@ -129,7 +136,7 @@ object HinglishPrompt {
     }
 
     /**
-     * Example sentences in prompts are often quoted, so Gemini sometimes
+     * Example sentences in prompts are often quoted, so models sometimes
      * wraps a whole answer in them. Remove those quotes unless the original
      * text was itself a quotation.
      */
@@ -147,7 +154,14 @@ object HinglishPrompt {
     private val CODE_FENCE = Regex("^```[a-zA-Z]*\\s*$", RegexOption.MULTILINE)
     private val XML_TAG = Regex("</?(input|output|translation)>", RegexOption.IGNORE_CASE)
     private val PREAMBLE = Regex("^(here is|here's|sure)[^\\n]*:\\s*\\n", RegexOption.IGNORE_CASE)
-    private val LABEL = Regex("^((modern |good )?(hindi|hinglish)|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
+
+    /** "Hindi:", "Modern Spanish:", "Español:", "Translation:" at the start of an answer. */
+    private fun labelFor(target: Language?): Regex {
+        val names = listOfNotNull("hindi", "hinglish", target?.englishName, target?.nativeName)
+            .joinToString("|") { Regex.escape(it) }
+        return Regex("^((modern |good |natural )?($names)( translation)?|translation)\\s*:\\s*", RegexOption.IGNORE_CASE)
+    }
+
     private val HEADING_MARK = Regex("^#{1,6}\\s*")
     private val BULLET_MARK = Regex("^[-*•●◦▪]\\s+")
     private val NUMBER_MARK = Regex("^\\(?\\d{1,3}[.)]\\s+")

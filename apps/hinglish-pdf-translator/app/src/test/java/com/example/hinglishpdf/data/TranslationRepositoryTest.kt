@@ -4,6 +4,8 @@ import com.example.hinglishpdf.data.ai.AITranslator
 import com.example.hinglishpdf.data.ai.TranslatorException
 import com.example.hinglishpdf.data.document.BlockKind
 import com.example.hinglishpdf.data.document.DocBlock
+import com.example.hinglishpdf.data.llm.Language
+import com.example.hinglishpdf.data.llm.TranslationPrompt
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -27,9 +29,11 @@ class TranslationRepositoryTest {
     private class FakeGemini(private val script: (request: Int, blocks: Int) -> Fault = { _, _ -> Fault.NONE }) :
         AITranslator {
         val prompts = mutableListOf<String>()
+        val systemPrompts = mutableListOf<String>()
 
-        override fun translate(chunk: String): Flow<String> = flow {
+        override fun translate(systemPrompt: String, chunk: String): Flow<String> = flow {
             prompts += chunk
+            systemPrompts += systemPrompt
             val blocks = chunk.split("\n\n")
             val out = blocks.map { block ->
                 val marker = Regex("^(#+ |\\s*- |\\s*\\d+\\. )?").find(block)!!.value
@@ -88,6 +92,17 @@ class TranslationRepositoryTest {
         assertEquals(PageEvent.ChunkStarted(1, 1), events.first())
         assertTrue(events.count { it is PageEvent.Token } > 5)
         assertEquals(PageEvent.PageFinished(expected), events.last())
+        // Default pair: Auto-Detect → Hindi.
+        assertEquals(TranslationPrompt.system(Language.AUTO_DETECT, Language.HINDI), gemini.systemPrompts.single())
+    }
+
+    @Test
+    fun `the system prompt carries the book's languages`() = runTest {
+        val gemini = FakeGemini()
+        repository(gemini).translatePage(page, Language.ENGLISH, Language.FRENCH).toList()
+        val system = gemini.systemPrompts.single()
+        assertTrue(system.contains("Translate the following text from English to French."))
+        assertEquals(TranslationPrompt.system(Language.ENGLISH, Language.FRENCH), system)
     }
 
     @Test

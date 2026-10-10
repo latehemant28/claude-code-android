@@ -9,6 +9,7 @@ import com.example.hinglishpdf.data.db.AppDatabase
 import com.example.hinglishpdf.data.db.BookEntity
 import com.example.hinglishpdf.data.document.BundledFonts
 import com.example.hinglishpdf.data.document.DocFormat
+import com.example.hinglishpdf.data.document.ExportLabels
 import com.example.hinglishpdf.data.document.PdfExporter
 import com.example.hinglishpdf.data.epub.EpubBook
 import com.example.hinglishpdf.data.epub.EpubWriter
@@ -29,7 +30,8 @@ import java.io.OutputStream
  *  - PDF from either: A4 pages with the text flowing across them and the
  *    Noto fonts embedded.
  *
- * Pages not translated yet keep their original text, so a paused book can be
+ * Everything is labelled with the book's target language ("To"). Pages not
+ * translated yet keep their original text, so a paused book can be
  * exported too.
  */
 class BookExporter(
@@ -42,14 +44,18 @@ class BookExporter(
 
     suspend fun exportToDownloads(book: BookEntity, format: DocFormat): Saved = withContext(Dispatchers.IO) {
         val pages = db.pageDao().pages(book.id)
-        val name = "${book.title} (Hindi).${format.extension}"
+        val language = book.toLanguage
+        val name = "${book.title} (${language.englishName}).${format.extension}"
         val uri = saveToDownloads(name, format.mimeType) { out ->
             when {
-                format == DocFormat.PDF -> PdfExporter(fonts).write(out, pages, sourceIsPdf = book.format == DocFormat.PDF)
+                format == DocFormat.PDF ->
+                    PdfExporter(fonts, language).write(out, pages, sourceIsPdf = book.format == DocFormat.PDF)
                 book.format == DocFormat.EPUB -> EpubBook.writeTranslated(
                     File(book.sourcePath),
                     out,
                     pages.flatMap { p -> p.translations ?: List(p.sourceBlocks.size) { null } },
+                    language = language.code,
+                    rightToLeft = language.rightToLeft,
                 )
                 else -> EpubWriter.write(
                     out,
@@ -64,7 +70,10 @@ class BookExporter(
                         )
                     },
                     pageMarkers = true,
-                    fonts = fonts.epubFonts(),
+                    fonts = if (language.devanagari) fonts.epubFonts() else emptyMap(),
+                    language = language.code,
+                    rightToLeft = language.rightToLeft,
+                    labels = ExportLabels.forLanguage(language),
                 )
             }
         }

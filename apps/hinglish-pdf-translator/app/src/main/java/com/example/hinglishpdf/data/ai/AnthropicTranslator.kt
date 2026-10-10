@@ -1,6 +1,5 @@
 package com.example.hinglishpdf.data.ai
 
-import com.example.hinglishpdf.data.llm.HinglishPrompt
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 
@@ -15,14 +14,14 @@ class AnthropicTranslator(
     private val endpoint: String = "https://api.anthropic.com/v1/messages",
 ) : HttpStreamingTranslator("Claude", model) {
 
-    override fun request(chunk: String, temperature: Boolean) = Request(
+    override fun request(systemPrompt: String, chunk: String, temperature: Boolean) = Request(
         url = endpoint,
         headers = mapOf("x-api-key" to apiKey, "anthropic-version" to API_VERSION),
         body = jsonObject {
             addProperty("model", model)
             // Room for a whole chunk in Devanagari, which takes several tokens per word.
             addProperty("max_tokens", MAX_TOKENS)
-            addProperty("system", HinglishPrompt.SYSTEM_PROMPT)
+            addProperty("system", systemPrompt)
             add(
                 "messages",
                 JsonArray().apply {

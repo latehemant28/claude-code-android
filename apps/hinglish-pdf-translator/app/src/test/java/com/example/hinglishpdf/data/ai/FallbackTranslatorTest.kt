@@ -21,7 +21,7 @@ class FallbackTranslatorTest {
         failures: (model: String) -> TranslatorException? = { null },
         failMidStream: TranslatorException? = null,
     ) = FallbackTranslator(models, "Gemini", now = { clock }) { model ->
-        AITranslator { chunk ->
+        AITranslator { _, chunk ->
             flow {
                 calls += model
                 if (failMidStream != null) {
@@ -41,12 +41,12 @@ class FallbackTranslatorTest {
         val gemini = engine(failures = retired)
         assertNull(gemini.activeModel.value)
 
-        assertEquals(listOf("gemini-3.5-flash-lite: page 1"), gemini.translate("page 1").toList())
+        assertEquals(listOf("gemini-3.5-flash-lite: page 1"), gemini.translate("system", "page 1").toList())
         assertEquals("gemini-3.5-flash-lite", gemini.activeModel.value)
         assertEquals(listOf("gemini-1.5-flash", "gemini-1.5-pro", "gemini-3.5-flash-lite"), calls)
 
         calls.clear()
-        gemini.translate("page 2").toList()
+        gemini.translate("system", "page 2").toList()
         assertEquals(listOf("gemini-3.5-flash-lite"), calls) // no more requests to the dead models
     }
 
@@ -60,20 +60,20 @@ class FallbackTranslatorTest {
                 null
             }
         })
-        assertEquals(listOf("gemini-3.8-flash: a"), gemini.translate("a").toList())
+        assertEquals(listOf("gemini-3.8-flash: a"), gemini.translate("system", "a").toList())
 
         limited = false
         clock += 10_000
-        assertEquals(listOf("gemini-3.8-flash: b"), gemini.translate("b").toList()) // still cooling down
+        assertEquals(listOf("gemini-3.8-flash: b"), gemini.translate("system", "b").toList()) // still cooling down
         clock += 25_000
-        assertEquals(listOf("gemini-3.5-flash-lite: c"), gemini.translate("c").toList()) // back to the preferred one
+        assertEquals(listOf("gemini-3.5-flash-lite: c"), gemini.translate("system", "c").toList()) // back to the preferred one
     }
 
     @Test
     fun `daily quota on every live model stops the book`() = runTest {
         val gemini = engine(failures = { m -> retired(m) ?: TranslatorException.DailyQuota() })
         try {
-            gemini.translate("x").toList()
+            gemini.translate("system", "x").toList()
             fail("expected DailyQuota")
         } catch (e: TranslatorException.DailyQuota) {
             // expected: the book pauses and resumes later
@@ -90,7 +90,7 @@ class FallbackTranslatorTest {
             )
         })
         try {
-            gemini.translate("x").toList()
+            gemini.translate("system", "x").toList()
             fail("expected Transient")
         } catch (e: TranslatorException.Transient) {
             assertTrue(e.rateLimited)
@@ -102,7 +102,7 @@ class FallbackTranslatorTest {
     fun `a list of only retired models fails clearly`() = runTest {
         val gemini = engine(models = listOf("gemini-1.5-flash", "gemini-1.5-pro"), failures = retired)
         try {
-            gemini.translate("x").toList()
+            gemini.translate("system", "x").toList()
             fail("expected Fatal")
         } catch (e: TranslatorException.Fatal) {
             assertTrue(e.message!!.contains("gemini-1.5-flash, gemini-1.5-pro"))
@@ -113,7 +113,7 @@ class FallbackTranslatorTest {
     fun `problems another model cannot fix are not hidden`() = runTest {
         val gemini = engine(failures = { TranslatorException.Fatal("Gemini rejected the API key.") })
         try {
-            gemini.translate("x").toList()
+            gemini.translate("system", "x").toList()
             fail("expected Fatal")
         } catch (e: TranslatorException.Fatal) {
             assertEquals(listOf("gemini-1.5-flash"), calls) // no pointless fallback
@@ -125,7 +125,7 @@ class FallbackTranslatorTest {
         val gemini = engine(failMidStream = TranslatorException.Transient("connection reset"))
         val received = mutableListOf<String>()
         try {
-            gemini.translate("x").collect { received += it }
+            gemini.translate("system", "x").collect { received += it }
             fail("expected Transient")
         } catch (e: TranslatorException.Transient) {
             assertEquals(listOf("half "), received)
@@ -137,7 +137,7 @@ class FallbackTranslatorTest {
     fun `a refusal mid-answer stays a refusal, so the text is kept in English`() = runTest {
         val gemini = engine(failMidStream = TranslatorException.Blocked("SAFETY"))
         try {
-            gemini.translate("x").toList()
+            gemini.translate("system", "x").toList()
             fail("expected Blocked")
         } catch (e: TranslatorException.Blocked) {
             assertEquals(listOf("gemini-1.5-flash"), calls)

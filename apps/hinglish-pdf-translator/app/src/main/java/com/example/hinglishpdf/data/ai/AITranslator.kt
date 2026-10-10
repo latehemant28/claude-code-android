@@ -13,12 +13,13 @@ import kotlinx.coroutines.flow.flow
  * pipeline only sees this interface, so it can also be tested without the
  * network.
  *
- * Every implementation sends the same system prompt (HinglishPrompt) as its
- * provider's system instruction, and the chunk of text as the user message.
+ * Every implementation sends [systemPrompt] (TranslationPrompt, filled with
+ * the book's From / To languages) as its provider's system instruction, and
+ * the chunk of text as the user message.
  */
 fun interface AITranslator {
     /** Streams the translation of [chunk]; failures are thrown as [TranslatorException]. */
-    fun translate(chunk: String): Flow<String>
+    fun translate(systemPrompt: String, chunk: String): Flow<String>
 }
 
 /** Provider failures, already sorted by what the app should do about them. */
@@ -86,12 +87,12 @@ class FallbackTranslator(
     /** The model that answered the last request (null until the first one). */
     val activeModel: StateFlow<String?> = _activeModel.asStateFlow()
 
-    override fun translate(chunk: String): Flow<String> = flow {
+    override fun translate(systemPrompt: String, chunk: String): Flow<String> = flow {
         for (name in models) {
             if (!isUsable(name)) continue
             var started = false
             try {
-                client(name).translate(chunk).collect { piece ->
+                client(name).translate(systemPrompt, chunk).collect { piece ->
                     started = true
                     emit(piece)
                 }

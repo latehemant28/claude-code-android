@@ -50,9 +50,16 @@ object EpubBook {
      * Writes [source] to [target] with each block's text replaced by
      * [translations] (aligned with the blocks returned by [read]; null keeps
      * the original text). Chapters and the package are re-labelled as
-     * [language], so readers pick a Hindi font and shape Devanagari correctly.
+     * [language] (and right-to-left if [rightToLeft]), so readers pick the
+     * right font and shape the script correctly.
      */
-    fun writeTranslated(source: File, target: OutputStream, translations: List<String?>, language: String = "hi") {
+    fun writeTranslated(
+        source: File,
+        target: OutputStream,
+        translations: List<String?>,
+        language: String = "hi",
+        rightToLeft: Boolean = false,
+    ) {
         ZipFile(source).use { zip ->
             val spine = readSpine(zip)
             val chapters = spine.chapters.toSet()
@@ -67,6 +74,7 @@ object EpubBook {
                 doc.allElements.firstOrNull { it.localName() == "html" }?.let { html ->
                     html.attr("xml:lang", language)
                     if (html.hasAttr("lang")) html.attr("lang", language) // XHTML 1.1 (EPUB 2) has no "lang"
+                    html.attr("dir", if (rightToLeft) "rtl" else "ltr")
                 }
                 rewritten[path] = serialize(doc).toByteArray(Charsets.UTF_8)
             }

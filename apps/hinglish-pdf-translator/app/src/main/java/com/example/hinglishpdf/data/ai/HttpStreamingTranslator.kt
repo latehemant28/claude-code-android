@@ -35,8 +35,11 @@ abstract class HttpStreamingTranslator(
 
     protected class Request(val url: String, val headers: Map<String, String>, val body: JsonObject)
 
-    /** The request for one chunk. [temperature] is false once the model has said it doesn't take one. */
-    protected abstract fun request(chunk: String, temperature: Boolean): Request
+    /**
+     * The request for one chunk, with [systemPrompt] as the provider's system
+     * instruction. [temperature] is false once the model has said it doesn't take one.
+     */
+    protected abstract fun request(systemPrompt: String, chunk: String, temperature: Boolean): Request
 
     /**
      * The new text in one streamed event (null or "" if it has none). Throws
@@ -54,9 +57,9 @@ abstract class HttpStreamingTranslator(
     @Volatile
     private var temperatureRejected = false
 
-    override fun translate(chunk: String): Flow<String> = flow {
+    override fun translate(systemPrompt: String, chunk: String): Flow<String> = flow {
         while (true) {
-            val sent = stream(request(chunk, temperature = !temperatureRejected), this)
+            val sent = stream(request(systemPrompt, chunk, temperature = !temperatureRejected), this)
             if (sent) return@flow
             temperatureRejected = true // the model refused the temperature: same request without it
         }
