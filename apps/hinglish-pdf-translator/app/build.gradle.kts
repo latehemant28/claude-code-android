@@ -32,8 +32,8 @@ android {
         // Android 10+: MediaStore saves to Downloads without any storage permission.
         minSdk = 29
         targetSdk = 35
-        versionCode = 19
-        versionName = "4.2"
+        versionCode = 20
+        versionName = "4.3"
 
         // Quotes and backslashes escaped so any key is a valid Java string literal.
         val escapedKey = geminiApiKey.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -125,6 +125,10 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Runs the Room DAOs against real SQLite on the JVM.
     testImplementation("org.robolectric:robolectric:4.14.1")
+    // Compose UI tests on the JVM (Robolectric): screens, buttons and messages.
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     // The W3C EPUB validator: generated EPUBs must pass it.

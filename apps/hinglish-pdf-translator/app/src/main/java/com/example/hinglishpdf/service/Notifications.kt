@@ -12,6 +12,7 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.hinglishpdf.MainActivity
+import com.example.hinglishpdf.ui.status.ErrorGuide
 
 object Notifications {
     const val PROGRESS_ID = 1
@@ -31,7 +32,12 @@ object Notifications {
         )
     }
 
-    /** The persistent "Translating page 45 of 300..." notification, with a Pause button. */
+    /**
+     * The persistent "Translating page 45 of 300..." notification, with a Pause button.
+     * Manipulation Matrix: does this materially improve the user's work? Yes:
+     * Android requires it for background work, and it shows progress and a
+     * way to stop, silently (no sound, no repeats).
+     */
     fun progress(context: Context, title: String, text: String, done: Int, total: Int): Notification {
         val pause = PendingIntent.getService(
             context, 1,
@@ -54,6 +60,11 @@ object Notifications {
 
     fun update(context: Context, notification: Notification) = post(context, PROGRESS_ID, notification)
 
+    /**
+     * The book is ready: tapping opens the file.
+     * Manipulation Matrix: does this materially improve the user's work? Yes:
+     * it delivers the result the user asked for, once.
+     */
     fun finished(context: Context, title: String, fileName: String, uri: Uri, mimeType: String) {
         val open = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, mimeType)
@@ -68,12 +79,20 @@ object Notifications {
         post(context, RESULT_ID, notification)
     }
 
+    /**
+     * The book needs the user: told as guidance (what happened, what to do),
+     * opening the app where the button to do it is.
+     * Manipulation Matrix: does this materially improve the user's work? Yes:
+     * the translation has stopped and only the user can unblock it.
+     */
     fun failed(context: Context, title: String, message: String) {
+        val guide = ErrorGuide.of(message)
+        val text = guide.explanation
         val notification = NotificationCompat.Builder(context, CHANNEL_RESULT)
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle("Translation of $title stopped")
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentTitle("$title: ${guide.title}")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setContentIntent(openApp(context))
             .build()

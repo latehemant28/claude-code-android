@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.ai.CustomTranslator
 import com.example.hinglishpdf.data.settings.ProviderSettings
+import com.example.hinglishpdf.ui.status.InputCleaner
 
 /**
  * Picks the AI provider, and holds its API key: "Get API key" opens the
@@ -154,21 +155,29 @@ fun ProviderCard(
                         Text("Get API Key")
                     }
                 }
+                // Whatever is pasted is cleaned (quotes, "Bearer ", "API_KEY=", spaces);
+                // a key that still can't be right says why instead of just greying out Save.
+                val cleaned = InputCleaner.apiKey(key)
+                val problem = InputCleaner.apiKeyProblem(cleaned)
                 OutlinedTextField(
                     value = key,
-                    onValueChange = { key = it.trim() },
+                    onValueChange = { key = it },
                     label = { Text("${provider.displayName} API key") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    isError = problem != null,
+                    supportingText = {
+                        Text(problem ?: "Paste the whole key; spaces, quotes and labels are removed for you.")
+                    },
                     trailingIcon = {
-                        IconButton(onClick = { clipboard.getText()?.text?.trim()?.let { key = it } }) {
+                        IconButton(onClick = { clipboard.getText()?.text?.let { key = it } }) {
                             Icon(Icons.Filled.ContentPaste, contentDescription = "Paste")
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button(onClick = { onSaveKey(provider, key) }, enabled = key.length >= 20) { Text("Save key") }
+                Button(onClick = { onSaveKey(provider, cleaned) }, enabled = cleaned.isNotEmpty() && problem == null) { Text("Save key") }
             }
 
             // 3. Optional model name, tried before the defaults (Custom: part of its form until saved).
@@ -176,7 +185,7 @@ fun ProviderCard(
                 var model by rememberSaveable(provider, settings.customModel(provider)) {
                     mutableStateOf(settings.customModel(provider))
                 }
-                val changed = model.trim() != settings.customModel(provider)
+                val changed = InputCleaner.modelName(model) != settings.customModel(provider)
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it },
@@ -196,7 +205,7 @@ fun ProviderCard(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     trailingIcon = {
                         if (changed) {
-                            IconButton(onClick = { onSetModel(provider, model) }) {
+                            IconButton(onClick = { onSetModel(provider, InputCleaner.modelName(model)) }) {
                                 Icon(Icons.Filled.Check, contentDescription = "Use this model")
                             }
                         }
@@ -219,18 +228,28 @@ private fun CustomProviderForm(settings: ProviderSettings.State, onSave: (url: S
     var url by rememberSaveable { mutableStateOf(settings.customUrl) }
     var key by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf(settings.customModel(AIProvider.CUSTOM)) }
-    val urlValid = CustomTranslator.chatCompletionsUrl(url) != null
+    // "api.example.com/v1" or "http://..." is fixed up to https:// rather than refused.
+    val cleanedUrl = InputCleaner.serviceUrl(url)
+    val urlValid = CustomTranslator.chatCompletionsUrl(cleanedUrl) != null
+    val cleanedKey = InputCleaner.apiKey(key)
     Text(
         "Any AI service with an OpenAI-compatible API. Enter its address, your key and the model name.",
         style = MaterialTheme.typography.bodyMedium,
     )
     OutlinedTextField(
         value = url,
-        onValueChange = { url = it.trim() },
+        onValueChange = { url = it },
         label = { Text("API address") },
         placeholder = { Text("https://example.com/v1") },
         supportingText = {
-            Text(if (url.isBlank() || urlValid) "The address before /chat/completions." else "Must start with https://")
+            Text(
+                when {
+                    url.isBlank() -> "The address before /chat/completions."
+                    !urlValid -> "This doesn't look like a web address. Example: https://example.com/v1"
+                    cleanedUrl != url.trim() -> "Will use $cleanedUrl"
+                    else -> "The address before /chat/completions."
+                },
+            )
         },
         isError = url.isNotBlank() && !urlValid,
         singleLine = true,
@@ -239,7 +258,7 @@ private fun CustomProviderForm(settings: ProviderSettings.State, onSave: (url: S
     )
     OutlinedTextField(
         value = key,
-        onValueChange = { key = it.trim() },
+        onValueChange = { key = it },
         label = { Text("API key") },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
@@ -259,7 +278,7 @@ private fun CustomProviderForm(settings: ProviderSettings.State, onSave: (url: S
         modifier = Modifier.fillMaxWidth(),
     )
     Button(
-        onClick = { onSave(url, key, model) },
-        enabled = urlValid && key.isNotBlank() && model.isNotBlank(),
+        onClick = { onSave(cleanedUrl, cleanedKey, InputCleaner.modelName(model)) },
+        enabled = urlValid && cleanedKey.isNotBlank() && InputCleaner.modelName(model).isNotBlank(),
     ) { Text("Save") }
 }

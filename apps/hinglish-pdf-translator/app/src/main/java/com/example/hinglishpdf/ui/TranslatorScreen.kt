@@ -13,84 +13,83 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.sp
-import com.example.hinglishpdf.ui.reader.LocalReaderStyle
-import com.example.hinglishpdf.ui.reader.ReaderSettingsSheet
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.hinglishpdf.data.ai.AIProvider
 import com.example.hinglishpdf.data.db.BookStatus
 import com.example.hinglishpdf.data.db.BookWithProgress
-import com.example.hinglishpdf.data.db.PageEntity
-import com.example.hinglishpdf.data.document.BlockKind
-import com.example.hinglishpdf.data.document.DocBlock
 import com.example.hinglishpdf.data.document.DocFormat
-import com.example.hinglishpdf.data.document.bulletFor
-import com.example.hinglishpdf.data.ai.AIProvider
+import com.example.hinglishpdf.ui.reader.LocalReaderStyle
+import com.example.hinglishpdf.ui.reader.ReaderSettingsSheet
+import com.example.hinglishpdf.ui.status.ErrorGuide
+import com.example.hinglishpdf.ui.status.GuideAction
+import com.example.hinglishpdf.ui.status.MiniStageMap
+import com.example.hinglishpdf.ui.status.ProgressPanel
+import kotlinx.coroutines.launch
 
+/**
+ * The main screen, laid out as the job's steps: 1 connect an AI, 2 choose a
+ * book, 3 choose the file you get; then your books, each with its stage map
+ * and its next action in view. A book opens as a project screen.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TranslatorScreen(viewModel: TranslatorViewModel) {
@@ -106,14 +105,19 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     var browserFor by rememberSaveable { mutableStateOf<AIProvider?>(null) }
     var pastedKey by remember { mutableStateOf<String?>(null) }
+    var openBookId by rememberSaveable { mutableStateOf<Long?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
 
-    // Storage Access Framework pickers: no storage permission required.
+    // Any file can be picked: the app recognises PDFs and EPUBs by their content,
+    // whatever their name or the type a file manager gives them.
     val bookPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::addBook)
     }
+    fun pickBook() = bookPicker.launch(arrayOf("*/*"))
 
     // Android 13+: ask once so "Translating page 45 of 300..." can be shown.
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -121,10 +125,21 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    // Messages, some with an action (Undo). When one goes away unanswered, its timeout runs.
     LaunchedEffect(state.message) {
-        state.message?.let {
-            snackbar.showSnackbar(it)
-            viewModel.messageShown()
+        val message = state.message ?: return@LaunchedEffect
+        var acted = false
+        try {
+            val result = snackbar.showSnackbar(
+                message.text,
+                actionLabel = message.action,
+                withDismissAction = message.action != null,
+                duration = if (message.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
+            )
+            acted = result == SnackbarResult.ActionPerformed
+        } finally {
+            if (acted) message.onAction?.invoke() else message.onTimeout?.invoke()
+            viewModel.messageShown(message)
         }
     }
 
@@ -137,6 +152,82 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             showTerms = true
         }
     }
+
+    /** Back to step 1 (the AI provider card), with a word on what to do there. */
+    fun goToProvider(hint: String) {
+        openBookId = null
+        scope.launch { listState.animateScrollToItem(0) }
+        viewModel.showMessage(hint)
+    }
+
+    fun startNewBook() {
+        if (!state.configured) {
+            goToProvider("First connect an AI in step 1: choose a provider and paste its key.")
+        } else {
+            withTerms { pickBook() }
+        }
+    }
+
+    fun openFile(entry: BookWithProgress) {
+        val book = entry.book
+        val uri = book.outputUri ?: return
+        val format = DocFormat.ofFileName(book.outputName) ?: book.format
+        try {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri), format.mimeType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+            )
+        } catch (e: Exception) {
+            viewModel.showMessage("No app on this phone opens ${format.name} files. It is in Downloads: ${book.outputName}")
+        }
+    }
+
+    fun onGuide(action: GuideAction, entry: BookWithProgress?) {
+        when (action) {
+            GuideAction.RESUME -> entry?.let { withTerms { viewModel.resume(it.book) } }
+            GuideAction.FIX_KEY -> goToProvider("Paste the key again in step 1 (or remove it and get a new one), then tap Resume on the book.")
+            GuideAction.CHANGE_PROVIDER -> goToProvider("Choose another AI in step 1 and add its key, then tap Resume on the book.")
+            GuideAction.SET_MODEL -> goToProvider("Type a current model name in the Model field of step 1, then tap Resume on the book.")
+            GuideAction.ADD_CREDIT -> {
+                val page = state.provider.keyPageUrl
+                if (page != null) {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(page))) }
+                        .onFailure { viewModel.showMessage("Open $page in a browser to add credit.") }
+                } else {
+                    viewModel.showMessage("Add credit on your AI service's website, then tap Resume.")
+                }
+            }
+            GuideAction.ACCEPT_TERMS -> {
+                afterTerms = entry?.let { e -> { viewModel.resume(e.book) } }
+                showTerms = true
+            }
+            GuideAction.CHOOSE_OTHER_FILE -> {
+                openBookId = null
+                startNewBook()
+            }
+            GuideAction.SAVE_AGAIN -> entry?.let { viewModel.saveToDownloads(it.book) }
+        }
+    }
+
+    fun actionsFor(entry: BookWithProgress) = ProjectActions(
+        onPause = viewModel::pause,
+        onResume = { withTerms { viewModel.resume(entry.book) } },
+        onSave = { viewModel.saveToDownloads(entry.book) },
+        onOpenFile = { openFile(entry) },
+        onCopy = {
+            val message = try {
+                clipboard.setText(AnnotatedString(viewModel.plainText()))
+                "Copied the translated ${entry.book.unitName}s"
+            } catch (e: RuntimeException) {
+                "Too long to copy at once. Use Save to Downloads instead."
+            }
+            viewModel.showMessage(message)
+        },
+        onDelete = {
+            openBookId = null
+            viewModel.requestDelete(entry.book)
+        },
+        onGuide = { onGuide(it, entry) },
+    )
 
     if (showTerms) {
         TermsDialog(
@@ -151,6 +242,18 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                 showTerms = false
                 afterTerms = null
             },
+        )
+    }
+
+    state.importProblem?.let { guide ->
+        AlertDialog(
+            onDismissRequest = viewModel::importProblemShown,
+            title = { Text(guide.title) },
+            text = { Text(guide.explanation) },
+            confirmButton = {
+                Button(onClick = { viewModel.importProblemShown(); onGuide(guide.primary, null) }) { Text(guide.primary.label) }
+            },
+            dismissButton = { TextButton(onClick = viewModel::importProblemShown) { Text("Close") } },
         )
     }
 
@@ -173,7 +276,22 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
         )
     }
 
+    val openEntry = state.books.firstOrNull { it.book.id == openBookId }
+    LaunchedEffect(openEntry?.book?.id) { openEntry?.let { viewModel.select(it.book.id) } }
+
     CompositionLocalProvider(LocalReaderStyle provides readerStyle) {
+        if (openEntry != null) {
+            ProjectScreen(
+                entry = openEntry,
+                state = state,
+                pages = pages,
+                livePage = livePage,
+                snackbar = snackbar,
+                actions = actionsFor(openEntry),
+                onClose = { openBookId = null },
+            )
+            return@CompositionLocalProvider
+        }
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -183,10 +301,9 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
                         IconButton(onClick = { showTextSettings = true }) {
                             Text("Aa", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
-                        // Settings menu.
                         Box {
                             IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Filled.MoreVert, contentDescription = "Settings")
+                                Icon(Icons.Filled.MoreVert, contentDescription = "More options")
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(
@@ -205,102 +322,50 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item(key = "format") {
-                    OutputFormatSelector(state.outputFormat, onSelect = viewModel::setOutputFormat)
+                item(key = "step-ai") {
+                    Step(1, "Connect an AI", done = state.configured) {
+                        ProviderCard(
+                            settings = state.providers,
+                            activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
+                            busy = state.live.running,
+                            pastedKey = pastedKey,
+                            onPastedKeyShown = { pastedKey = null },
+                            onSelect = viewModel::selectProvider,
+                            onGetKey = { browserFor = it },
+                            onSaveKey = viewModel::saveApiKey,
+                            onSaveCustom = viewModel::saveCustomProvider,
+                            onRemoveKey = viewModel::removeApiKey,
+                            onSetModel = viewModel::setModel,
+                        )
+                    }
                 }
-
-                item(key = "provider") {
-                    ProviderCard(
-                        settings = state.providers,
-                        activeModel = state.activeModel?.takeIf { it.startsWith(state.provider.displayName) },
-                        busy = state.live.running,
-                        pastedKey = pastedKey,
-                        onPastedKeyShown = { pastedKey = null },
-                        onSelect = viewModel::selectProvider,
-                        onGetKey = { browserFor = it },
-                        onSaveKey = viewModel::saveApiKey,
-                        onSaveCustom = viewModel::saveCustomProvider,
-                        onRemoveKey = viewModel::removeApiKey,
-                        onSetModel = viewModel::setModel,
-                    )
+                item(key = "step-book") {
+                    Step(2, "Choose a book", done = state.books.isNotEmpty()) {
+                        NewBookCard(
+                            configured = state.configured,
+                            importing = state.importing,
+                            onPick = ::startNewBook,
+                            onShowTerms = { afterTerms = null; showTerms = true },
+                        )
+                    }
                 }
-
-                item(key = "new") {
-                    NewBookCard(
-                        enabled = state.canAddBook,
-                        importing = state.importing,
-                        onPick = {
-                            withTerms {
-                                // Some file managers label EPUBs as generic binaries.
-                                bookPicker.launch(arrayOf(DocFormat.PDF.mimeType, DocFormat.EPUB.mimeType, "application/octet-stream"))
-                            }
-                        },
-                        onShowTerms = { afterTerms = null; showTerms = true },
-                    )
+                item(key = "step-format") {
+                    Step(3, "Choose the file you get", done = false, showDone = false) {
+                        OutputFormatSelector(state.outputFormat, onSelect = viewModel::setOutputFormat)
+                    }
                 }
 
                 if (state.books.isNotEmpty()) {
                     item(key = "library-title") {
-                        Text("Your books", style = MaterialTheme.typography.titleMedium)
+                        Text("Your books", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
                     }
                     items(state.books, key = { "book-${it.book.id}" }) { entry ->
-                        BookCard(
-                            entry = entry,
-                            selected = entry.book.id == state.selected?.book?.id,
-                            running = state.isRunning(entry.book),
-                            liveLabel = state.live.label.takeIf { state.isRunning(entry.book) },
-                            onSelect = { viewModel.select(entry.book.id) },
-                            onPause = viewModel::pause,
-                            onResume = { withTerms { viewModel.resume(entry.book) } },
-                            saveFormat = state.outputFormat,
-                            onSave = { viewModel.saveToDownloads(entry.book) },
-                            onOpen = {
-                                val uri = entry.book.outputUri ?: return@BookCard
-                                val format = DocFormat.ofFileName(entry.book.outputName) ?: entry.book.format
-                                try {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW)
-                                            .setDataAndType(Uri.parse(uri), format.mimeType)
-                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                    )
-                                } catch (e: Exception) {
-                                    viewModel.showMessage("No app found to open ${entry.book.outputName}")
-                                }
-                            },
-                            onCopy = {
-                                val message = try {
-                                    clipboard.setText(AnnotatedString(viewModel.plainText()))
-                                    "Copied the translated pages"
-                                } catch (e: RuntimeException) {
-                                    "Too large for the clipboard; use Save instead"
-                                }
-                                viewModel.showMessage(message)
-                            },
-                            onDelete = { viewModel.delete(entry.book) },
-                        )
-                    }
-                }
-
-                val selected = state.selected
-                if (selected != null) {
-                    val unit = selected.book.unitName.replaceFirstChar { it.uppercase() }
-                    val live = livePage
-                    if (state.isRunning(selected.book) && live != null) {
-                        item(key = "live") { LiveCard(state.live.label, live, unit) }
-                    }
-                    if (pages.isNotEmpty()) {
-                        item(key = "preview-title") {
-                            Text("Preview: ${selected.book.title}", style = MaterialTheme.typography.titleMedium)
-                        }
-                    }
-                    // Newest page first while translating, so progress is visible without scrolling.
-                    val ordered = if (state.isRunning(selected.book)) pages.asReversed() else pages
-                    items(ordered, key = { "page-${it.bookId}-${it.pageNumber}" }) { page ->
-                        PageView(page, unit)
+                        BookCard(entry, state, actionsFor(entry), onOpen = { openBookId = entry.book.id })
                     }
                 }
             }
@@ -308,26 +373,56 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
     }
 }
 
+/** A numbered step of the job, with a tick once it is done: the order to do things in, visible. */
 @Composable
-private fun NewBookCard(
-    enabled: Boolean,
-    importing: Boolean,
-    onPick: () -> Unit,
-    onShowTerms: () -> Unit,
-) {
+private fun Step(number: Int, title: String, done: Boolean, showDone: Boolean = true, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(24.dp).background(
+                    if (done && showDone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                    CircleShape,
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (done && showDone) {
+                    Icon(Icons.Filled.Check, contentDescription = "Done", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+                } else {
+                    Text("$number", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(title, style = MaterialTheme.typography.titleSmall)
+        }
+        content()
+    }
+}
+
+@Composable
+private fun NewBookCard(configured: Boolean, importing: Boolean, onPick: () -> Unit, onShowTerms: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Translate a book into Hindi", style = MaterialTheme.typography.titleSmall)
-            Button(onClick = onPick, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.UploadFile, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (importing) "Opening…" else "Select PDF / EPUB")
+            // Never greyed out without a reason: without an AI it explains what to do first.
+            Button(onClick = onPick, enabled = !importing, modifier = Modifier.fillMaxWidth()) {
+                if (importing) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Opening the book…")
+                } else {
+                    Icon(Icons.Filled.UploadFile, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Select PDF / EPUB")
+                }
             }
             Text(
-                "Runs in the background, page by page. You can lock the phone; every page is saved " +
-                    "as soon as it is done and translation resumes after a crash or restart.",
+                if (configured) {
+                    "Runs in the background, page by page. You can lock the phone; every page is saved " +
+                        "as soon as it is done, and translation picks up where it stopped."
+                } else {
+                    "Connect an AI in step 1 first."
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (configured) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
             )
             Text(
                 "For personal use, with documents you have the rights to. Terms of Use",
@@ -339,19 +434,14 @@ private fun NewBookCard(
     }
 }
 
-/** "Output Format: [ PDF | EPUB ]": what Save to Downloads writes. */
+/** "PDF | EPUB": what Save to Downloads writes. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OutputFormatSelector(format: DocFormat, onSelect: (DocFormat) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Output Format:", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.width(12.dp))
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val options = listOf(DocFormat.PDF, DocFormat.EPUB)
-            SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     SegmentedButton(
                         selected = option == format,
@@ -362,206 +452,71 @@ private fun OutputFormatSelector(format: DocFormat, onSelect: (DocFormat) -> Uni
                     }
                 }
             }
+            Text(
+                if (format == DocFormat.EPUB) "An e-book that reflows on any screen." else "Fixed A4 pages, ready to print or share.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
+/**
+ * One book: where it is (headline and a compact stage map), its progress
+ * and time left while running, and its next action as a visible button.
+ * Tapping the card opens the project screen with everything else.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BookCard(
-    entry: BookWithProgress,
-    selected: Boolean,
-    running: Boolean,
-    liveLabel: String?,
-    onSelect: () -> Unit,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    saveFormat: DocFormat,
-    onSave: () -> Unit,
-    onOpen: () -> Unit,
-    onCopy: () -> Unit,
-    onDelete: () -> Unit,
-) {
+private fun BookCard(entry: BookWithProgress, state: TranslatorUiState, actions: ProjectActions, onOpen: () -> Unit) {
     val book = entry.book
-    val colors = if (selected) {
-        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-    } else {
-        CardDefaults.cardColors()
-    }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onSelect), colors = colors) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                "${book.title}.${book.format.extension}",
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val unit = book.unitName
-            val status = liveLabel ?: when (book.status) {
-                BookStatus.QUEUED -> "Waiting to start"
-                BookStatus.READING -> "Reading ${unit}s…"
-                BookStatus.TRANSLATING -> "Interrupted: will resume at the next untranslated $unit"
-                BookStatus.PAUSED -> "Paused"
-                BookStatus.COMPLETED -> "Done · saved to Downloads${book.outputName?.let { ": $it" } ?: ""}"
-                BookStatus.FAILED -> "Stopped: ${book.error}"
-            }
-            Text(
-                "${entry.translatedPages} of ${book.pageCount.takeIf { it > 0 } ?: "?"} ${unit}s · $status",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (book.status == BookStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-            )
-            if (book.pageCount > 0) {
-                LinearProgressIndicator(
-                    progress = { entry.translatedPages.toFloat() / book.pageCount },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } else if (running) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-            }
-            if (selected) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    when {
-                        running -> OutlinedButton(onClick = onPause) {
-                            Icon(Icons.Filled.Pause, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Pause")
-                        }
-                        book.status != BookStatus.COMPLETED -> FilledTonalButton(onClick = onResume) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Resume")
-                        }
-                    }
-                    if (entry.translatedPages > 0) {
-                        FilledTonalButton(onClick = onSave) {
-                            Icon(Icons.Filled.Save, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Save ${saveFormat.name} to Downloads")
-                        }
-                        IconButton(onClick = onCopy) { Icon(Icons.Filled.ContentCopy, contentDescription = "Copy text") }
-                    }
-                    if (book.outputUri != null) {
-                        IconButton(onClick = onOpen) { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open saved file") }
-                    }
-                    if (!running) {
-                        IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete") }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** The page in progress: finished blocks with their structure, then the chunk being written. */
-@Composable
-private fun LiveCard(label: String, live: LivePage, unit: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label, style = MaterialTheme.typography.labelLarge)
-            if (live.chunkCount > 1) {
-                Text(
-                    "$unit ${live.page} · part ${live.chunk} of ${live.chunkCount}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                LinearProgressIndicator(
-                    progress = { (live.chunk - 1).coerceAtLeast(0).toFloat() / live.chunkCount },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            var previous: DocBlock? = null
-            for ((block, text) in live.blocks) {
-                BlockView(block, text, previous)
-                previous = block
-            }
-            if (live.streaming.isNotEmpty()) {
-                val reader = LocalReaderStyle.current
-                Text(
-                    "${live.streaming}▍",
-                    fontFamily = reader.font.family,
-                    fontSize = reader.textSizeSp.sp,
-                    lineHeight = (reader.textSizeSp * 1.6f).sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-/** One translated page, rendered with its original structure. */
-@Composable
-private fun PageView(page: PageEntity, unit: String) {
+    val status = state.status(entry)
+    val running = state.isRunning(book)
     Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = CardDefaults.outlinedCardBorder(),
+        onClick = onOpen,
+        modifier = Modifier.fillMaxWidth(),
+        colors = if (status.needsAttention) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f))
+        } else {
+            CardDefaults.cardColors()
+        },
     ) {
-        SelectionContainer {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("$unit ${page.pageNumber}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                HorizontalDivider()
-                var previous: DocBlock? = null
-                page.sourceBlocks.forEachIndexed { i, block ->
-                    val text = page.translations?.getOrNull(i) ?: block.text
-                    if (text.isNotBlank()) {
-                        BlockView(block, text, previous)
-                        previous = block
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(book.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            MiniStageMap(status)
+            Text(
+                status.headline,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (status.needsAttention) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
+            if (running) {
+                val live = state.live
+                ProgressPanel(live.label, if (live.total > 0) live.done else 0, live.total, state.timeLeft(book))
+            } else if (book.pageCount > 0 && entry.translatedPages in 1 until book.pageCount) {
+                ProgressPanel("${entry.translatedPages} of ${book.pageCount} ${book.unitName}s translated", entry.translatedPages, book.pageCount, null)
+            }
+            if (status.needsAttention) {
+                val guide = ErrorGuide.of(if (book.id in state.needsOcr) "This PDF is scanned" else book.error)
+                Text(guide.title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                when {
+                    status.needsAttention -> {
+                        val guide = ErrorGuide.of(if (book.id in state.needsOcr) "This PDF is scanned" else book.error)
+                        Button(onClick = { actions.onGuide(guide.primary) }) { Text(guide.primary.label) }
                     }
+                    state.pausingBookId == book.id -> OutlinedButton(onClick = {}, enabled = false) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pausing…")
+                    }
+                    running -> OutlinedButton(onClick = actions.onPause) { Label(Icons.Filled.Pause, "Pause") }
+                    book.status == BookStatus.COMPLETED && book.outputUri != null ->
+                        Button(onClick = actions.onOpenFile) { Label(Icons.AutoMirrored.Filled.OpenInNew, "Open file") }
+                    book.status != BookStatus.COMPLETED -> Button(onClick = actions.onResume) { Label(Icons.Filled.PlayArrow, "Resume") }
                 }
-                if (page.sourceBlocks.isEmpty()) {
-                    Text("(No text on this page of the original)", style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic)
-                }
+                TextButton(onClick = onOpen) { Text("Details") }
             }
         }
     }
 }
-
-@Composable
-private fun BlockView(block: DocBlock, text: String, previous: DocBlock?) {
-    // Translated text uses the reader's chosen Hindi font and size; headings scale with it.
-    val reader = LocalReaderStyle.current
-    val body = TextStyle(
-        fontFamily = reader.font.family,
-        fontSize = reader.textSizeSp.sp,
-        lineHeight = (reader.textSizeSp * 1.6f).sp, // Devanagari needs room for matras
-    )
-    val isList = block.kind == BlockKind.BULLET || block.kind == BlockKind.NUMBERED
-    val prevIsList = previous?.kind == BlockKind.BULLET || previous?.kind == BlockKind.NUMBERED
-    val top = when {
-        previous == null -> 0.dp
-        block.kind == BlockKind.HEADING -> 12.dp
-        isList && prevIsList -> 0.dp
-        else -> 6.dp
-    }
-    Box(Modifier.padding(top = top)) {
-        when (block.kind) {
-            BlockKind.HEADING -> {
-                val scale = when (block.level) { 1 -> 1.45f; 2 -> 1.3f; 3 -> 1.15f; else -> 1.05f }
-                Text(
-                    text,
-                    style = body.copy(
-                        fontSize = (reader.textSizeSp * scale).sp,
-                        lineHeight = (reader.textSizeSp * scale * 1.4f).sp,
-                        fontWeight = FontWeight.Bold,
-                    ),
-                )
-            }
-            BlockKind.BULLET, BlockKind.NUMBERED -> Row(Modifier.padding(start = (block.level * 20).dp)) {
-                Text(
-                    if (block.kind == BlockKind.BULLET) bulletFor(block.level) else block.marker,
-                    style = body,
-                    modifier = Modifier.widthIn(min = 22.dp).padding(end = 6.dp),
-                )
-                Text(text, style = body)
-            }
-            BlockKind.QUOTE -> Row(Modifier.height(IntrinsicSize.Min)) {
-                Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
-                Spacer(Modifier.width(10.dp))
-                Text(text, style = body, fontStyle = FontStyle.Italic)
-            }
-            BlockKind.CODE -> Text(text, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
-            BlockKind.PARAGRAPH -> Text(text, style = body)
-        }
-    }
-}
-

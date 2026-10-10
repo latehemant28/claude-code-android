@@ -111,6 +111,10 @@ interface PipelineDao {
     @Query("SELECT * FROM segments WHERE bookId = :bookId ORDER BY ordinal")
     suspend fun segments(bookId: Long): List<SegmentEntity>
 
+    /** Books whose PDF turned out to be scanned (they need OCR). */
+    @Query("SELECT bookId FROM parsed_documents WHERE needsOcr = 1")
+    fun observeNeedsOcr(): kotlinx.coroutines.flow.Flow<List<Long>>
+
     @Query("SELECT COUNT(*) FROM segments WHERE bookId = :bookId")
     suspend fun segmentCount(bookId: Long): Int
 

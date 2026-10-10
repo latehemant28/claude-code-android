@@ -40,6 +40,19 @@ Android's `PdfDocument` for writing PDFs, and `java.util.zip` for EPUBs.
 > be translated. On Gemini's free tier, Google's terms say content may be
 > used to improve its products. The app has no server of its own.
 
+## Using the app
+
+The main screen follows the job's steps: **1 Connect an AI**, **2 Choose a
+book**, **3 Choose the file you get**, then **Your books**. Each book card
+shows a compact stage map, where the book is ("Translating · 45 of 300
+pages"), progress with a deliberately generous time estimate, and its next
+action (Pause, Resume, Open file, or the fix for a problem). Tapping a book
+opens its project screen: the full stage map (Uploaded > Parsed > Translated
+> Checked > Rebuilt > Delivered), guidance when something needs you (what
+happened, what to do, a button to do it; progress is always kept), the
+actions, and the translated pages. Deleting a book can be undone. Design
+notes: [`docs/ux-audit-phase1.md`](docs/ux-audit-phase1.md).
+
 ## Setup: pick a provider and add its API key
 
 At the top of the screen:

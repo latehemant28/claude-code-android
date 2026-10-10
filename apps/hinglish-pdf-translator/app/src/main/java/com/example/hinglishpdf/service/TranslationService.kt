@@ -17,6 +17,7 @@ import com.example.hinglishpdf.data.document.DocumentFormatter
 import com.example.hinglishpdf.data.PageEvent
 import com.example.hinglishpdf.data.pdf.PdfPasswordProtectedException
 import com.example.hinglishpdf.pipeline.NeedsOcrException
+import com.example.hinglishpdf.ui.status.Eta
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -91,7 +92,9 @@ class TranslationService : Service() {
         val books = app.db.bookDao()
         val pages = app.db.pageDao()
         val id = initial.id
-        app.monitor.update { LiveStatus(running = true, bookId = id, label = "Starting…") }
+        app.monitor.update {
+            LiveStatus(running = true, bookId = id, label = "Starting…", phase = LivePhase.STARTING, phaseStartedAt = System.currentTimeMillis())
+        }
         try {
             showProgress(initial, "Starting…", 0, 0)
             check(app.preferences.termsAccepted) {
@@ -114,7 +117,7 @@ class TranslationService : Service() {
                 books.setStatus(id, BookStatus.READING)
                 var lastShown = 0L
                 val extracted = app.importer.readPages(initial) { label, done, total ->
-                    app.monitor.update { it.copy(label = label) }
+                    app.monitor.progress(LivePhase.READING, done, total, label)
                     val now = System.currentTimeMillis()
                     if (now - lastShown > 1_000) { // don't flood the notification
                         lastShown = now
@@ -139,7 +142,8 @@ class TranslationService : Service() {
                         liveText = "", waiting = false,
                     )
                 }
-                showProgress(book, label, page.pageNumber - 1, book.pageCount)
+                app.monitor.progress(LivePhase.TRANSLATING, page.pageNumber - 1, book.pageCount, label)
+                showProgress(book, withTimeLeft(label), page.pageNumber - 1, book.pageCount)
 
                 // The answer streams in; the page is saved only once complete.
                 var translations: List<String?> = emptyList()
@@ -179,7 +183,8 @@ class TranslationService : Service() {
             // 3. Build the PDF or EPUB (the Output Format toggle) and save it to Downloads.
             val format = app.preferences.outputFormat.value
             val saving = "Saving ${format.name} to Downloads…"
-            app.monitor.update { it.copy(label = saving, liveText = "", waiting = false) }
+            app.monitor.update { it.copy(liveText = "", waiting = false) }
+            app.monitor.progress(LivePhase.SAVING, 0, 0, saving)
             showProgress(book, saving, book.pageCount, book.pageCount)
             val saved = app.exporter.exportToDownloads(book, format)
             books.setStatus(id, BookStatus.COMPLETED)
@@ -207,7 +212,7 @@ class TranslationService : Service() {
             val parsed = try {
                 withContext(Dispatchers.IO) {
                     app.documentParser.parse(File(book.sourcePath), book.format) { label, done, total ->
-                        app.monitor.update { it.copy(label = label) }
+                        app.monitor.progress(LivePhase.ANALYSING, done, total, label)
                         if (done == total || done % 10 == 0) showProgress(book, label, done, total)
                     }
                 }
@@ -224,6 +229,13 @@ class TranslationService : Service() {
         } else if (stored.needsOcr) {
             throw NeedsOcrException(JsonParser.parseString(stored.scannedPages).asJsonArray.size(), stored.pageCount)
         }
+    }
+
+    /** "Translating page 45 of 300... · About 25 min left" (under-promised; see Eta). */
+    private fun withTimeLeft(label: String): String {
+        val s = app.monitor.status.value
+        val left = Eta.remainingMillis(s.doneAtStart, s.done, s.total, s.phaseStartedAt, System.currentTimeMillis())
+        return if (left == null) label else "$label · ${Eta.format(left)}"
     }
 
     private fun showProgress(book: BookEntity, text: String, done: Int, total: Int) =
