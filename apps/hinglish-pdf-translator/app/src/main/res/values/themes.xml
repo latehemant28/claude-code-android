@@ -1,0 +1,4 @@
+<resources>
+    <!-- Compose draws the real UI; this only styles the window before it loads. -->
+    <style name="Theme.HinglishPdf" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

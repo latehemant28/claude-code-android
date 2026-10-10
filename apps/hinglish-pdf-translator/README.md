@@ -1,0 +1,509 @@
+# Hindi Book Translator (Android)
+
+An Android app that translates whole books (PDFs and EPUBs) into natural,
+conversational **Hindi in Devanagari** (हिंदी), the way modern urban Indians
+speak, page by page, in the background, with the AI provider you choose: **Google
+Gemini**, **Sarvam AI**, **Groq**, **OpenRouter**, **Cerebras**, **Mistral
+AI**, **DeepSeek**, **OpenAI**, **Anthropic Claude**, **xAI Grok**,
+**Cohere**, or any other service with an OpenAI-compatible API (**Custom**).
+
+- **Context-aware:** adapts आप / तुम and the tone to the book's genre, uses
+  everyday English words written in Devanagari (ऑप्शन, प्लान) instead of
+  bookish Hindi, and keeps speaker labels, names and "Chapter 1" in English.
+- **Twelve providers:** pick one from a dropdown (each shows whether it is
+  free or paid); each has its own translator class (Strategy pattern) for
+  its endpoint and JSON. OpenRouter alone reaches 400+ models (Qwen, Kimi,
+  GLM, Llama, Gemma...) with one key. **Get API
+  Key** opens the provider's own key page inside the app; copy a key there,
+  close it, and the key is pasted for you.
+- **PDF or EPUB output:** an **Output Format: [ PDF | EPUB ]** toggle (EPUB
+  by default) decides what **Save to Downloads** writes, whatever the source.
+- **Structure kept:** headings, bullet points (with nesting), numbering and
+  paragraph breaks are restored after translation.
+- **Model fallback:** a prioritized list of models per provider; a retired,
+  out-of-quota or rate-limited model is swapped for the next one automatically.
+- **Reading UI:** Devanagari fonts from Google Fonts (Mukta, Noto Serif
+  Devanagari, Kalam) and an **Aa** sheet for font style and text size.
+- **Background and crash-proof:** a foreground service with a "Translating
+  page 45 of 300..." notification; every page is saved to Room the moment it
+  is done, and a restart resumes at the first untranslated page.
+- **Terms of Use:** a disclaimer that must be accepted before the first
+  translation, and always available from the ⋮ menu.
+- **Small:** ~6.8 MB APK, including the embedded Noto fonts.
+
+Tech: Kotlin, Jetpack Compose (Material 3, downloadable Google Fonts), the
+providers' HTTPS streaming APIs (HttpURLConnection + Gson, no provider SDK),
+Room, a foreground service, Coroutines/Flow, `pdfbox-android` for reading,
+Android's `PdfDocument` for writing PDFs, and `java.util.zip` for EPUBs.
+
+> **Privacy:** the text of your books is sent to the provider you select to
+> be translated. On Gemini's free tier, Google's terms say content may be
+> used to improve its products. The app has no server of its own.
+
+## Using the app
+
+The main screen follows the job's steps: **1 Connect an AI**, **2 Choose a
+book**, **3 Choose the file you get**, then **Your books**. Each book card
+shows a compact stage map, where the book is ("Translating · 45 of 300
+pages"), progress with a deliberately generous time estimate, and its next
+action (Pause, Resume, Open file, or the fix for a problem). Tapping a book
+opens its project screen: the full stage map (Uploaded > Parsed > Translated
+> Checked > Rebuilt > Delivered), guidance when something needs you (what
+happened, what to do, a button to do it; progress is always kept), the
+actions, and the translated pages. Deleting a book can be undone. Design
+notes: [`docs/ux-audit-phase1.md`](docs/ux-audit-phase1.md).
+
+## Setup: pick a provider and add its API key
+
+At the top of the screen:
+
+1. **AI provider** dropdown: the providers below, each with a word on cost.
+2. **Get API Key** opens that provider's official key dashboard in an in-app
+   browser:
+
+   | Provider | Key page | Cost |
+   |---|---|---|
+   | Google Gemini | https://aistudio.google.com/app/apikey | Free tier (rate-limited) |
+   | Sarvam AI (India) | https://dashboard.sarvam.ai (API Keys) | Paid from credits; free credits on sign-up |
+   | Groq | https://console.groq.com/keys | Free tier (small limits) |
+   | OpenRouter | https://openrouter.ai/keys | Free models (50 requests a day, 1,000 after buying 10 credits); others paid |
+   | Cerebras | https://cloud.cerebras.ai | Free tier (5 requests a minute, 1M tokens a day) |
+   | Mistral AI | https://console.mistral.ai/api-keys | Free Experiment plan; paid plans |
+   | DeepSeek | https://platform.deepseek.com/api_keys | Paid per use (low cost) |
+   | OpenAI | https://platform.openai.com/api-keys | Paid per use |
+   | Anthropic Claude | https://console.anthropic.com/settings/keys | Paid per use |
+   | xAI Grok | https://console.x.ai/team/default/api-keys | Paid per use |
+   | Cohere | https://dashboard.cohere.com/api-keys | Free trial key (20 a minute, 1,000 a month) |
+   | Custom | (your service's own) | Any OpenAI-compatible API |
+
+   **Custom** has no key page: type the service's **API address** (https
+   only, e.g. `https://example.com/v1`; `/chat/completions` is added), its
+   key and the model name, then tap **Save**. Use it for Together,
+   Fireworks, Qwen's Model Studio, Moonshot, a company's own server...
+
+   Sign in, create a key, tap the site's **Copy** button, and close the
+   browser (✕). If the clipboard holds something that looks like a key, it is
+   pasted into the key field; check it and tap **Save key**. The paste button
+   in the field does the same by hand.
+3. **Model (optional):** leave empty to use the provider's defaults in order,
+   or type a model name to try first.
+
+Keys are kept per provider, only on the phone (app-private storage, excluded
+from backups), never in code or git.
+
+**Google sign-in inside apps:** Google blocks some sign-ins in embedded
+browsers ("This browser or app may not be secure"). If that happens, tap the
+open-in-browser button in the in-app browser's top bar, copy the key in
+Chrome, come back and use the paste button.
+
+### Gemini key at build time (optional)
+
+A Gemini key can also be compiled in from `local.properties` (git-ignored),
+or from the `GEMINI_API_KEY` environment variable when `local.properties`
+has none:
+
+```properties
+sdk.dir=/path/to/Android/sdk
+GEMINI_API_KEY=my_actual_key_here
+```
+
+`app/build.gradle.kts` reads it into `BuildConfig.GEMINI_API_KEY`, which takes
+priority over a Gemini key pasted in the app. A key compiled into an APK can
+be extracted by anyone who has that APK, so don't publish such an APK.
+
+### The translator strategies
+
+[`data/ai`](app/src/main/java/com/example/hinglishpdf/data/ai) holds one
+`AITranslator` implementation per provider, all sharing
+`HttpStreamingTranslator` (one streamed HTTPS request, server-sent events):
+
+| Class | Endpoint | Prompt goes in | Text arrives in |
+|---|---|---|---|
+| `GeminiTranslator` | `…/v1beta/models/{model}:streamGenerateContent?alt=sse` (`x-goog-api-key`) | `systemInstruction` | `candidates[0].content.parts[].text` (thoughts skipped) |
+| `OpenAITranslator` | `api.openai.com/v1/chat/completions` (Bearer) | `system` message | `choices[0].delta.content` |
+| `GroqTranslator` | `api.groq.com/openai/v1/chat/completions` (Bearer) | `system` message | `choices[0].delta.content` |
+| `SarvamTranslator` | `api.sarvam.ai/v1/chat/completions` (`api-subscription-key` + Bearer; reasoning off, `max_tokens` 8192) | `system` message | `choices[0].delta.content` |
+| `OpenRouterTranslator`, `CerebrasTranslator`, `MistralTranslator`, `DeepSeekTranslator`, `XAITranslator`, `CohereTranslator`, `CustomTranslator` | each provider's OpenAI-compatible `…/chat/completions` (Bearer) | `system` message | `choices[0].delta.content` |
+| `AnthropicTranslator` | `api.anthropic.com/v1/messages` (`x-api-key`, `anthropic-version`) | `system` | `content_block_delta` events |
+
+`AIProvider.createTranslator()` instantiates the right class for the
+provider selected in the app. Each class also sorts its provider's error
+answers into what the app should do (wait, swap model, stop with a message).
+If a model rejects the temperature (some newer models accept only their
+default), the request is repeated without one and the model is remembered.
+
+### Which model: automatic fallback
+
+Each provider has a prioritized list (`AIProvider.defaultModels`):
+
+| Provider | Models, in order |
+|---|---|
+| Gemini | `gemini-1.5-flash`, `gemini-1.5-pro` (both retired by Google on 29 Sept 2025), `gemini-3.5-flash-lite`, `gemini-3.8-flash` |
+| OpenAI | `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-5-mini` |
+| Anthropic | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-haiku-4-5` |
+| Groq | `llama-3.3-70b-versatile`, `openai/gpt-oss-120b` |
+| Sarvam AI | `sarvam-105b`, `sarvam-105b-conversations` |
+| OpenRouter | `google/gemma-4-31b-it:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `google/gemma-4-26b-a4b-it:free`, `openrouter/free` |
+| Cerebras | `gpt-oss-120b`, `qwen-3.8-27b` |
+| Mistral AI | `mistral-medium-latest`, `mistral-small-latest`, `mistral-large-latest` |
+| DeepSeek | `deepseek-flash`, `deepseek-v4-pro` |
+| xAI Grok | `grok-4.20-0309-non-reasoning`, `grok-4.3`, `grok-4.7` |
+| Cohere | `command-a-plus-05-2026`, `command-a-03-2025` |
+| Custom | the model typed in the app |
+
+A model typed in the app's Model field is tried first. `FallbackTranslator`
+tries them in order and moves on silently when a model fails in a way
+another model can fix:
+
+| Failure | What happens |
+|---|---|
+| Retired / not found, or "limit: 0" for this key | Skipped for the rest of the app session |
+| Daily quota used up | Skipped for an hour, then tried again |
+| Rate-limited (429) | Skipped until the provider says it can retry; earlier models are preferred again afterwards |
+| Bad key, no credit, region, refused text, no internet | Not hidden: another model would not help |
+| Every model rate-limited | Waits for the first one to free up |
+| Every model retired | Stops with a message to type a current model name |
+
+A model that fails *after* it started answering is never spliced with another
+model's text; the whole request is retried. The provider card shows which
+model actually answered.
+
+## Build
+
+Requirements: JDK 17+, Android SDK 35.
+
+```bash
+cd apps/hinglish-pdf-translator
+./gradlew testDebugUnitTest assembleDebug
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+`./gradlew assembleRelease` gives an R8-shrunk, unsigned APK (~6.8 MB); sign
+it with your own key before installing.
+
+## How it works
+
+```
+Select PDF/EPUB ─► BookImporter.copyIn ─► Room: book (QUEUED) ─► TranslationService
+                                                                   │
+  0. Parse once: PdfLayout / EpubParser ─► DocumentAssembler        │
+     ─► Segmenter ─► Room: parsed_documents, paragraphs, segments   │
+  1. Pages once ─► Room: pages (one transaction)                    │
+     books since 4.4: real PDF pages / EPUB sections built from the │
+     assembled paragraphs (PipelinePages); older books: as below    │
+  2. books since 4.4: ParagraphChunker → 1-3 whole paragraphs per   │
+     request, structure markers {P} {LI} {H1} {COL}…, answer matched│
+     back by marker, page saved once all its paragraphs are done    │
+     older books, page by page:                                     │
+     loop: page = first page with translations IS NULL              │
+        TranslationRepository.translatePage(page):                  │
+          BlockChunker: page → chunk(s) of whole blocks (≤800 words)│
+          request = the chunk (system prompt = the prompt):          │
+              # Chapter 4                                           │
+              It was a cold morning.                                │
+              - Bring a coat                                        │
+              2. Leave early                                        │
+          AITranslator for the selected provider (streamed) ─► UI   │
+          answer matched back block by block                        │
+        Room: save page N immediately                               │
+  3. Output Format toggle: EpubWriter / EpubBook or PdfExporter ─► Downloads
+```
+
+### The prompt
+
+[`HinglishPrompt.SYSTEM_PROMPT`](app/src/main/java/com/example/hinglishpdf/data/llm/HinglishPrompt.kt)
+is the specified context-aware Hindi prompt, word for word (a unit test checks
+it). The specified text stopped before closing its `<examples>` tag, so the
+closing `</examples>` line was added. Every provider receives it as its
+**system prompt**, and each request carries only the chunk of text. For
+books translated through the pipeline (4.4 and later) the request starts
+with the locked technical rules (copy placeholders and structure markers,
+keep numbers, add or skip nothing) followed by the blocks, one per line, each
+behind its marker; the system prompt is unchanged.
+Temperature is 0.2 (unless a model refuses one), and Gemini's safety filters
+are set to `BLOCK_NONE` so ordinary literature isn't refused mid-book.
+
+### Reading UI
+
+The **Aa** button in the top bar opens a bottom sheet:
+
+| Style | Google Font |
+|---|---|
+| Sans-serif (default) | Mukta |
+| Serif | Noto Serif Devanagari |
+| Casual | Kalam |
+
+A slider sets the text size from 14 to 28 sp, with headings scaling along.
+Lines are spaced at 1.6× so Devanagari matras aren't cramped. The choice is
+saved on the phone. Fonts are downloaded once through Google Play Services
+(`res/values/font_certs.xml` is the standard Google Fonts certificate list);
+until they arrive, or on a phone without Play Services, the system's own
+Devanagari font is used. Exports use the bundled Noto fonts (see Export).
+
+### Getting the structure back
+
+The chunk is written as Markdown, one block per paragraph. The AI's answer is
+split the same way; code fences, a leading "Modern Hindi:" label (the prompt's
+examples use one) and quotes wrapped around the whole answer are removed first.
+Speaker labels such as "YOUTH:" are part of the text and stay.
+
+- **Block count matches:** block *i* is the translation of block *i*, and the
+  app re-applies the original marker. A bullet stays a bullet even if the AI
+  drops the `-`.
+- **Count doesn't match** (merged or split paragraphs): nothing is guessed.
+  The chunk is translated again in two halves, recursively, until it lines up.
+- **A block comes back empty:** it is retried on its own.
+- **The AI refuses some text** (or it is too long for one request): it is
+  split, and text that is still refused stays in English instead of stopping
+  the book.
+
+### Limits and errors
+
+[`TranslationRepository.kt`](app/src/main/java/com/example/hinglishpdf/data/TranslationRepository.kt)
+paces requests and handles errors as follows:
+
+| Situation | What the app does |
+|---|---|
+| Every chunk | A fixed pause after each translated chunk: **4.5 s** for Gemini and Groq (about 13 requests a minute, under Gemini's free 15), 12 s Cerebras (5 a minute), 3.5 s OpenRouter and Cohere, 2 s Mistral, 1.5 s Sarvam, 1 s the paid ones; never less than 4 s between two requests |
+| Rate limit (429) | Another model of the provider is tried first; if all are limited, **waits** (60 s for Gemini, OpenRouter, Cerebras and Cohere, 30 s Groq and Mistral, 20 s for the others, or longer if the provider asks) and tries again, **with no retry limit**. The notification shows the provider's own message |
+| "limit: 0" (no quota for this model and key) | The model is skipped for the session, like a retired one |
+| Daily quota used up | Stops the book with a clear message; **Resume** later continues at the same page |
+| Network drop, timeout, 5xx, overloaded, unreadable answer | Retried with backoff (15 s → 5 min), up to 8 times, then stops; **Resume** continues at the same page |
+| Invalid key (in any provider's error format), no billing credit, region, or no usable model | Stops with a message saying what to fix |
+
+**Pause** closes the open connection at once, even mid-answer.
+
+### Threads
+
+The repository's `Flow` runs on `Dispatchers.Default` (network, parsing,
+stitching). The service publishes progress to a `StateFlow`. The ViewModel
+prepares the live page on `Dispatchers.Default` (conflated) and Compose
+collects it on the main thread.
+
+### Fault tolerance
+
+- `pages` has primary key `(bookId, pageNumber)`. A page's `translations`
+  column is NULL until the whole page is done, and the page is written as soon
+  as it is.
+- Resuming means "first page where translations IS NULL". A crash mid-page
+  redoes only that page.
+- The service is `START_STICKY`. If Android kills it, Android restarts it and
+  it resumes. After a crash or reboot, opening the app restarts it.
+
+### Export: PDF or EPUB
+
+The **Output Format: [ PDF | EPUB ]** toggle at the top of the screen (EPUB
+by default) decides what **Save to Downloads**, and the automatic save when a
+book finishes, write. Files go to **Downloads** through MediaStore, which
+needs no storage permission on Android 10+ (this app's minimum). Pages not
+translated yet keep their original text, so a paused book can be saved too.
+
+| Source → output | How |
+|---|---|
+| EPUB → EPUB | The same EPUB with its text translated: chapters, styles, images and table of contents are kept; chapters and the package are re-labelled `hi` so readers pick a Hindi font |
+| PDF → EPUB | [`EpubWriter`](app/src/main/java/com/example/hinglishpdf/data/epub/EpubWriter.kt) builds a new **EPUB 3**: UTF-8 XHTML chapters split at the book's top-level headings (or every 20 pages), nested `<ul>`/`<ol>` lists with the original markers, a table of contents (plus a legacy `toc.ncx`), a page list that maps to the original page numbers, `xml:lang="hi"`, and Noto Sans Devanagari embedded |
+| PDF or EPUB → PDF | [`PdfExporter`](app/src/main/java/com/example/hinglishpdf/data/document/PdfExporter.kt) lays the text out on **A4 pages**: lines break properly and text flows on to the next page ([`PdfPaginator`](app/src/main/java/com/example/hinglishpdf/data/document/PdfPaginator.kt): headings stay with their text, no lone first or last lines). Drawn with the bundled **Noto Sans Devanagari** + **Noto Sans** (Latin), which the PDF embeds, so Hindi renders correctly in any viewer. From a PDF, "— 45 —" marks where page 45 of the original begins; from an EPUB, each chapter starts on a new page |
+
+The generated EPUBs are checked in the unit tests with the W3C's official
+validator, **EPUBCheck 5.1** (no errors, no warnings). The fonts are under the
+SIL Open Font License (`app/src/main/assets/fonts/OFL.txt`).
+
+### Terms of Use
+
+Before the first translation (selecting a book, or Resume on a book from an
+older version), the **Terms of Use** dialog appears with this disclaimer:
+
+> Disclaimer: This app is purely a translation tool. Users are solely
+> responsible for ensuring they have the necessary rights and permissions for
+> any documents they upload and translate. The app does not claim ownership of
+> any content, does not store files on our servers, and is strictly meant for
+> personal use to comply with copyright laws.
+
+**I Agree** is enabled only after ticking "I have read the disclaimer and I
+agree to these Terms of Use". **Not now** closes the dialog and nothing is
+translated. The acceptance (with its date) is saved on the phone; the
+background service also refuses to run a book until it is given. The text is
+always available from the ⋮ menu → **Terms of Use & Disclaimer**, and a link
+under "Select PDF / EPUB".
+
+## Pipeline (in progress)
+
+The app is being turned into a pipeline: Upload > Preflight > **Parser >
+Segmenter** > Analyzer > Prompt Builder > Translation Engine > Editor > QA >
+Rebuilder > Layout Verifier > Delivery. Parsing, document assembly,
+segmentation and paragraph-based translation are in place
+([`pipeline/`](app/src/main/java/com/example/hinglishpdf/pipeline)).
+
+- **Configuration** ([`assets/pipeline-config.json`](app/src/main/assets/pipeline-config.json),
+  [`PipelineConfig.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/PipelineConfig.kt)):
+  every threshold and pattern (margin zones, repetition, running-head and
+  page-number patterns, boilerplate pages, captions, paragraph gap 1.3×,
+  indents, columns, tables, font tiers, terminal punctuation, standalone
+  words, request size) is a config value. A test keeps the file and the
+  built-in defaults equal.
+- **Placeholders** ([`Placeholders.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/Placeholders.kt),
+  [`InlineCodec.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/InlineCodec.kt)):
+  inline tags become `{1}text{/1}`, elements without text `[[IMG_3]]`,
+  `[[BR_4]]`, protected ones (`<code>`, `translate="no"`) `[[CODE_5]]`;
+  text that merely looks like a placeholder or a structure marker is
+  protected as `[[TXT_n]]`. Each tag's markup is stored and decoding
+  rebuilds the exact original nodes.
+- **Sentence segmenter** ([`SentenceSegmenter.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/segment/SentenceSegmenter.kt)):
+  sentences with their paragraph as parent; no cut after abbreviations
+  (Mr., e.g., Fig. 3), initials, decimals, inside quoted dialogue, before a
+  lower-case word or inside a paired placeholder; ends at `. ! ? …` and the
+  danda `।`. Each segment stores its source reference and a SHA-256 hash.
+  It runs after assembly, so a sentence across a page break is one segment.
+- **EPUB** ([`EpubPackage.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/epub/EpubPackage.kt),
+  [`EpubParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/epub/EpubParser.kt)):
+  OPF, NCX and nav are read; chapter text comes from the XHTML DOM's text
+  nodes; the title metadata, TOC labels and image alt text are units too.
+  Code, `<pre>`, scripts, styles, SVG, MathML and `translate="no"` are
+  skipped. Source map: file + XPath (+ attribute). The rebuilder writes
+  translations back with their tags (a paragraph joined across two files is
+  split back into both), sets `dc:language` / `xml:lang`, copies every other
+  file byte for byte, and its output passes EPUBCheck.
+- **PDF, stage 1: physical layout** ([`layout/`](app/src/main/java/com/example/hinglishpdf/pipeline/layout),
+  [`PdfParser.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/pdf/PdfParser.kt)):
+  scanned pages are detected (a mostly scanned book stops with "needs
+  OCR"). Glyphs become lines; furniture is classified line by line; text
+  inside images, tables (with row and column of every cell) and the rest
+  are ordered by **recursive X-Y cut**, chosen over Docstrum because
+  born-digital book pages are unskewed Manhattan layouts and the cut tree is
+  the reading order (bands whose gutters line up are merged first, so an
+  aligned paragraph gap never makes two columns read row by row). Every
+  block gets exactly one role (body, heading, list item, caption, table
+  cell, footnote, header, footer, page number, boilerplate, unknown) by
+  **weighted signals**, all in the config: margin zone, repetition across
+  pages (odd and even pages apart, or a run of pages), font tier, patterns
+  (page numbers, running heads whose number follows the page, "Figure n",
+  footnote marks, "intentionally left blank", printer's slugs), an image
+  next to it or around it, bullet or number plus indent. Output: a
+  `PageLayout` per page with blocks (role, box, font tier, column, reading
+  index, lines, scores) and the furniture kept apart for the merger.
+  Footnotes are read after the rest of the page. Reading order is measured
+  in the tests with the ICDAR 2013 method of Clausner et al.
+  ([`ReadingOrderMetric.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/layout/ReadingOrderMetric.kt):
+  pairwise relations, the paper's penalty matrix, s = 1 / (e / e50 + 1)).
+- **Stage 2: logical document** ([`DocumentAssembler.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/DocumentAssembler.kt),
+  [`LogicalDocument.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/logical/LogicalDocument.kt)):
+  one stream of typed elements for the whole book, independent of pages and
+  spine files: paragraphs, headings, lists (items holding nested lists),
+  tables (rows of cells, from the PDF layout or the EPUB markup), captions,
+  footnotes, TOC entries. Furniture is set apart and never breaks the
+  stream. A paragraph cut by a page, column or spine-file break is joined
+  with one space when the first part lacks terminal punctuation and the
+  next is body text in the same font tier that does not start with a
+  capital (lower case, a digit, or a script without capitals; leading
+  quotes are looked past). Footnotes, figures, captions and tables in
+  between are skipped over. Every element records its source spans:
+  (page, box, character range) for PDF, (spine file, XPath, character
+  range) for EPUB; cutting its text at the spans gives the source pieces
+  back.
+- **Stage 3: text units and skeleton** ([`TextUnits.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/units/TextUnits.kt),
+  [`Xliff.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/units/Xliff.kt),
+  [`ProjectFiles.kt`](app/src/main/java/com/example/hinglishpdf/data/project/ProjectFiles.kt)),
+  after Okapi's filter / skeleton / text-unit model: every text element is
+  a text unit (front and back matter included; numbers alone marked not to
+  translate) with a code table for its inline codes (paired `{1}…{/1}`,
+  standalone `[[IMG_3]]`); running heads are one unit per text. The
+  skeleton keeps the rest: the element tree with slots pointing to unit ids,
+  every unit's source spans, furniture, page sizes and images, bookmarks
+  (for an EPUB the original archive is the rest). Contents entries are
+  linked to the headings they name (EPUB nav / NCX targets, printed
+  contents lines, PDF bookmarks). Each book's project is kept as **XLIFF
+  2.1** (`book.xlf`: groups for lists and tables, `<pc>` / `<ph>` with
+  `<originalData>`, kind, level, code labels and contents links in the
+  Metadata module, translations as targets) plus `skeleton.json`, written
+  after analysis, on pause and on completion. **Export XLIFF** on the book's
+  screen saves both to Downloads for OmegaT or another CAT tool. Tests check
+  the file against the OASIS schemas and load it with Okapi's XLIFF 2
+  reader (the library behind the Okapi plugin for OmegaT) at maximal
+  validation.
+- **Hyphenation** ([`Hyphenation.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/Hyphenation.kt)):
+  no dictionary is bundled. "contrap-" + "tions" joins when the book writes
+  "contraptions" anywhere, or when the continuation is lower case and not a
+  standalone word; "well-" + "known" keeps its hyphen when the book writes
+  "well-known" mid-line or uses "known" on its own (plus an optional
+  configured list of standalone words, empty by default).
+- **Paragraph requests** ([`MarkerChunks.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/translate/MarkerChunks.kt),
+  [`ParagraphTranslator.kt`](app/src/main/java/com/example/hinglishpdf/data/translate/ParagraphTranslator.kt),
+  [`PipelinePages.kt`](app/src/main/java/com/example/hinglishpdf/data/translate/PipelinePages.kt)):
+  1 to 3 whole paragraphs per request (at most 800 words; a longer
+  paragraph goes alone, cut between sentences), never by page. Markers
+  `{P}` `{LI}` `{H1}`–`{H6}` `{Q}` `{CAP}` `{FN}` `{TD}` `{TOC}` `{T}` `{ALT}`
+  `{X}` and `{COL}` are copied back by the model and match each answer to its
+  paragraph; a mismatch, an empty answer or lost placeholders are asked
+  again paragraph by paragraph, and placeholders still lost are restored at
+  the end of the text. Pages are still what is saved and shown ("page 45 of
+  300"): a page is saved once every paragraph on it is translated. Smaller
+  requests mean more of them, so a free tier with a low per-minute limit is
+  slower; `chunkMaxParagraphs` and `chunkMaxWords` set the size.
+- **Storage:** database version 2 adds `parsed_documents`, `paragraphs` and
+  `segments`. Roles, font tiers, columns, list markers and source parts use
+  the existing columns (no migration). Books from before 4.4 keep their
+  page-by-page translation. After a parser upgrade the app says
+  "Re-analysing N books with the improved parser; your translations are
+  kept" before re-analysing in the background.
+- **OCR** (Google ML Kit, on the phone) comes after text-based PDFs.
+
+## Project structure
+
+```
+app/
+├── build.gradle.kts                Dependencies; GEMINI_API_KEY (local.properties) → BuildConfig
+├── proguard-rules.pro
+└── src/main/
+    ├── AndroidManifest.xml         INTERNET, foreground service (specialUse), wake lock, notifications
+    ├── assets/fonts/               Noto Sans Devanagari + Noto Sans (Latin subset) for exports, OFL.txt
+    ├── res/mipmap-*/               Launcher icon: adaptive (purple background + PDF→अ artwork), legacy, round
+    └── java/com/example/hinglishpdf/
+        ├── HinglishApp.kt          App-wide singletons (DB, translation engine for the selected provider, settings)
+        ├── MainActivity.kt
+        ├── service/
+        │   ├── TranslationService.kt   Foreground service: extract → translate page by page → export
+        │   ├── Notifications.kt        "Translating page 45 of 300..." + Pause, finished/failed
+        │   └── LiveStatus.kt           Live page and streaming text for the screen
+        ├── data/
+        │   ├── TranslationRepository.kt  Pacing, retries, page Flow (provider-independent)
+        │   ├── ai/                       AITranslator strategies: Gemini, OpenAI, Groq, Anthropic, and
+        │   │                             (MoreProviders.kt) Sarvam, OpenRouter, Cerebras, Mistral,
+        │   │                             DeepSeek, xAI, Cohere, Custom;
+        │   │                             AIProvider (key pages, models), FallbackTranslator
+        │   ├── llm/HinglishPrompt.kt     The Hindi system prompt + answer parser
+        │   ├── settings/                 Provider + keys, output format, Terms of Use acceptance
+        │   ├── db/                       Room: books, pages (PK = bookId + pageNumber), DAOs
+        │   ├── pdf/                      PDFBox extraction + layout analysis per page
+        │   ├── epub/                     EpubBook (read, translated copy), EpubWriter (new EPUB 3)
+        │   ├── document/                 Import, blocks, PDF export (PdfExporter, PdfPaginator, BundledFonts)
+        │   ├── export/BookExporter.kt    Writes the result to Downloads via MediaStore
+        │   └── translate/BlockChunker.kt Page → chunks of whole blocks
+        └── ui/                           Compose screen + ViewModel, provider card, in-app key browser,
+                                          Terms dialog; reader/ = fonts + Aa sheet
+```
+
+## Limitations
+
+- **Not yet run on a phone.** The build, lint, the unit tests (providers'
+  requests and errors against a local server, fallback, prompt, parser,
+  chunking, pagination, EPUB output validated with EPUBCheck, Room resume) and
+  live requests to the real endpoints of all eleven built-in providers
+  (each correctly rejected a dummy key) pass. A real translation with a
+  valid key, the in-app browser and the PDF rendering still need to be tried
+  on a device. The default model names were taken from each provider's
+  documentation in October 2026; when one is retired, the next is used.
+- **Google sign-in in the in-app browser** may be refused by Google; use the
+  open-in-browser button then (see Setup).
+- **Model names change.** If every default model of a provider is retired,
+  type a current one in the Model field.
+- **Free-tier limits** cap requests per minute and per day. A long book may
+  take more than one day; it resumes where it stopped.
+- **PDF structure is inferred** from font sizes, bold text, bullet glyphs,
+  numbering and indentation. Unusual layouts (multi-column, tables) come out as
+  plain paragraphs. Output pages are newly typeset, not a copy of the original.
+- **Images are not copied** into exports made from a PDF; picture-only pages
+  keep their place (a "— 45 —" marker) with a note.
+- **Scanned PDFs** contain images, not text; run OCR on them first.
+- **Battery optimisation:** some brands (Xiaomi, Oppo, Vivo...) kill
+  background apps aggressively. If translation stops with the screen off, set
+  the app's battery usage to "Unrestricted".

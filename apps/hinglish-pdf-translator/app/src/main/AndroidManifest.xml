@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Each chunk of text is translated by the AI provider picked in the app (Gemini, OpenAI, Claude, Groq). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Translation keeps running with the screen locked or the app in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Keeps the CPU awake while the screen is off (a foreground service alone does not). -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- "Translating page 45 of 300..." (runtime permission on Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+        Storage: none needed. Books are opened through the system file picker
+        (Storage Access Framework), and the finished PDF is written to
+        Downloads through MediaStore, which needs no permission on Android 10+
+        (this app's minSdk).
+    -->
+
+    <application
+        android:name=".HinglishApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:largeHeap="true"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HinglishPdf">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            A whole book can take hours (free tiers are rate-limited),
+            longer than dataSync allows on Android 15 (6 hours a day), so the
+            service is declared as specialUse.
+        -->
+        <service
+            android:name=".service.TranslationService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Translates a user-selected book page by page with the AI provider the user picked" />
+        </service>
+    </application>
+
+</manifest>
