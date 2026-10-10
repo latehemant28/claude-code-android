@@ -13,6 +13,7 @@ import com.example.hinglishpdf.data.document.PdfExporter
 import com.example.hinglishpdf.data.epub.EpubBook
 import com.example.hinglishpdf.data.epub.EpubWriter
 import com.example.hinglishpdf.data.db.PageEntity
+import com.example.hinglishpdf.data.project.ProjectFiles
 import com.example.hinglishpdf.data.translate.PipelinePages
 import com.example.hinglishpdf.pipeline.PipelineStore
 import com.example.hinglishpdf.pipeline.epub.EpubRebuilder
@@ -105,6 +106,21 @@ class BookExporter(
      * The file stays hidden (IS_PENDING) until fully written, and a name clash
      * gets " (1)" appended by the system.
      */
+    /**
+     * The book's translation project (XLIFF 2.1 and its skeleton) in
+     * Downloads, to open in a CAT tool such as OmegaT. Returns both names.
+     */
+    suspend fun exportXliff(book: BookEntity, files: ProjectFiles): List<String> = withContext(Dispatchers.IO) {
+        val doc = PipelineStore(db.pipelineDao()).load(book.id)
+            ?: throw IOException("The book has not been analysed yet. Tap Resume, then try again.")
+        val skeletonName = "${book.title}.skeleton.json"
+        val written = files.render(book, doc, db.pageDao().pages(book.id), skeletonHref = skeletonName)
+        val xliffName = "${book.title}.xlf"
+        saveToDownloads(xliffName, "application/xml") { it.write(written.xliff.toByteArray(Charsets.UTF_8)) }
+        saveToDownloads(skeletonName, "application/json") { it.write(written.skeleton.toByteArray(Charsets.UTF_8)) }
+        listOf(xliffName, skeletonName)
+    }
+
     private fun saveToDownloads(displayName: String, mimeType: String, write: (OutputStream) -> Unit): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {

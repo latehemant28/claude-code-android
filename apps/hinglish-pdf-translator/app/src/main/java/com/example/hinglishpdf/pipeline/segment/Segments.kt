@@ -105,6 +105,8 @@ data class TableCellRef(val table: Int, val row: Int, val column: Int)
  *   is made of, in order. More than one when a paragraph ran on across a
  *   page, column or file break; empty before assembly.
  * @param cell for a table cell: its table, row and column.
+ * @param link EPUB: for a contents entry, the "file#anchor" it points to;
+ *   for a heading, its own "file#anchor" (so entries can be matched to it).
  */
 data class ParsedParagraph(
     val role: ParagraphRole,
@@ -119,6 +121,7 @@ data class ParsedParagraph(
     val marker: String? = null,
     val parts: List<SourcePart> = emptyList(),
     val cell: TableCellRef? = null,
+    val link: String? = null,
 ) {
     /**
      * Where each stretch of the text came from: one span, or several when

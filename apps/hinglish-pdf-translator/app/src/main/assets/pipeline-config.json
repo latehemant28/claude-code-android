@@ -57,6 +57,10 @@
   "commonStandaloneWords": [],
   "standaloneMinCount": 2,
 
+  "tocLinePattern": "^(.*?)(?:[\\s.·…_-]+(?:\\d{1,4}|[ivxlc]{1,6}))?[\\s.·…_-]*$",
+  "leaderLinePattern": "^.*\\S[ .·…_]*[.·…_]{3,}[ .·…_]*(?:\\d{1,4}|[ivxlc]{1,6})$",
+  "tocMinEntries": 2,
+
   "chunkMaxParagraphs": 3,
   "chunkMaxWords": 800,
 

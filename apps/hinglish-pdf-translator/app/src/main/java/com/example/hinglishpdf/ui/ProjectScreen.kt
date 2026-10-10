@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
@@ -57,6 +58,8 @@ class ProjectActions(
     val onCopy: () -> Unit,
     val onDelete: () -> Unit,
     val onGuide: (GuideAction) -> Unit,
+    /** The translation project as XLIFF 2.1, for OmegaT and other CAT tools. */
+    val onExportXliff: () -> Unit = {},
 )
 
 /**
@@ -147,6 +150,9 @@ fun ProjectScreen(
                     }
                     if (book.outputUri != null) {
                         OutlinedButton(onClick = actions.onOpenFile) { Label(Icons.AutoMirrored.Filled.OpenInNew, "Open file") }
+                    }
+                    if (book.pageCount > 0) {
+                        OutlinedButton(onClick = actions.onExportXliff) { Label(Icons.Filled.IosShare, "Export XLIFF") }
                     }
                     OutlinedButton(onClick = actions.onDelete) {
                         Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)

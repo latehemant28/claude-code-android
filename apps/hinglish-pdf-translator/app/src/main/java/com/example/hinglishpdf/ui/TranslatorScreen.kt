@@ -227,6 +227,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel) {
             viewModel.requestDelete(entry.book)
         },
         onGuide = { onGuide(it, entry) },
+        onExportXliff = { viewModel.exportXliff(entry.book) },
     )
 
     if (showTerms) {

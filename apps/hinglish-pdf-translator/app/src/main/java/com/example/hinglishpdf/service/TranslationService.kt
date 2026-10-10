@@ -113,6 +113,7 @@ class TranslationService : Service() {
             // map. A scanned PDF stops here (it needs OCR). Any other problem with
             // the parser is logged and the book is translated page by page instead.
             val doc = analyse(initial)
+            if (doc != null) app.writeProject(initial)
 
             // 1. The pages, once. Pages are stored in one transaction, so an
             // interrupted extraction leaves none and is simply redone; a resumed
@@ -149,6 +150,7 @@ class TranslationService : Service() {
             app.monitor.update { it.copy(liveText = "", waiting = false) }
             app.monitor.progress(LivePhase.SAVING, 0, 0, saving)
             showProgress(book, saving, book.pageCount, book.pageCount)
+            app.writeProject(book)
             val saved = app.exporter.exportToDownloads(book, format)
             books.setStatus(id, BookStatus.COMPLETED)
             Notifications.finished(this, book.title, saved.displayName, saved.uri, format.mimeType)
@@ -157,6 +159,7 @@ class TranslationService : Service() {
                 // Paused by the user: wait for a manual resume. Otherwise (the
                 // service is being destroyed) leave it resumable.
                 if (pauseRequested) books.setStatus(id, BookStatus.PAUSED)
+                app.writeProject(initial)
             }
             throw e
         } catch (e: Throwable) {

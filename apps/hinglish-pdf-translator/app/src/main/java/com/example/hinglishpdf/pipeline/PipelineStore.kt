@@ -92,6 +92,7 @@ class PipelineStore(private val dao: PipelineDao) {
                     val o = e.asJsonObject
                     SourcePart(o["index"].asInt, refFromJson(o["ref"].toString()), o["start"].asInt, o["idOffset"].asInt, o["end"]?.asInt ?: -1)
                 } ?: listOfNotNull(layout?.get("source")?.asInt?.let { SourcePart(it, ref, 0, 0, row.text.length) }),
+                link = layout?.get("link")?.asString,
                 cell = layout?.get("cell")?.asJsonArray?.map { it.asInt }?.let { TableCellRef(it[0], it[1], it[2]) },
             )
         }
@@ -129,9 +130,11 @@ class PipelineStore(private val dao: PipelineDao) {
          * tables and figures read where they stand, footnotes last). 4:
          * stage 2 logical document (source spans with character ranges,
          * table cells with row and column, joins only into a non-capital
-         * start in the same font tier).
+         * start in the same font tier). 5: contents entries and headings
+         * carry their link targets; contents lines with leader dots are
+         * entries of their own; bookmarks and page geometry kept.
          */
-        const val PARSER_VERSION = 4
+        const val PARSER_VERSION = 5
 
         private val gson = Gson()
         private val tagsType = object : TypeToken<List<PlaceholderTag>>() {}.type
@@ -148,6 +151,7 @@ class PipelineStore(private val dao: PipelineDao) {
             if (p.tier != 0) o.addProperty("tier", p.tier)
             if (p.column != 0) o.addProperty("column", p.column)
             p.marker?.let { o.addProperty("marker", it) }
+            p.link?.let { o.addProperty("link", it) }
             p.cell?.let { c -> o.add("cell", JsonArray().apply { add(c.table); add(c.row); add(c.column) }) }
             when {
                 p.parts.size > 1 -> o.add(

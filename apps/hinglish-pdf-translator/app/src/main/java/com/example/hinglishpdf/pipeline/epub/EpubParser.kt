@@ -34,8 +34,10 @@ object EpubParser {
         val tables = mutableMapOf<Element, Int>()
         val units = epub.units().map { unit ->
             val encoded = unit.encode()
-            val cell = (unit as? EpubUnit.Run)?.takeIf { it.role == ParagraphRole.TABLE_CELL }?.let { cellOf(it.owner, tables) }
-            ParsedParagraph(role = unit.role, text = encoded.text, tags = encoded.tags, ref = unit.ref, level = unit.level, cell = cell)
+            val run = unit as? EpubUnit.Run
+            val cell = run?.takeIf { it.role == ParagraphRole.TABLE_CELL }?.let { cellOf(it.owner, tables) }
+            val link = run?.let { linkOf(epub, it) }
+            ParsedParagraph(role = unit.role, text = encoded.text, tags = encoded.tags, ref = unit.ref, level = unit.level, cell = cell, link = link)
         }
         // Some publishers split a chapter into several files mid-paragraph: join those back.
         val paragraphs = DocumentAssembler(config).assemble(units)
@@ -51,6 +53,35 @@ object EpubParser {
             paragraphs = paragraphs,
             segments = Segmenter.segment(paragraphs),
         )
+    }
+
+    /**
+     * A contents entry's target ("file#anchor", from the nav link or the NCX
+     * navPoint), or a heading's own address (its file and id), so entries can
+     * be linked to the headings they name.
+     */
+    private fun linkOf(epub: EpubPackage, run: EpubUnit.Run): String? {
+        val file = run.ref.file
+        val folder = file.substringBeforeLast('/', "")
+        fun target(href: String): String {
+            val path = if (href.startsWith("#")) file else epub.resolve(folder, href)
+            val anchor = href.substringAfter('#', "")
+            return if (anchor.isEmpty()) path else "$path#$anchor"
+        }
+        return when (run.role) {
+            ParagraphRole.TOC_LABEL -> {
+                val owner = run.owner
+                val ncxSrc = owner.parents().firstOrNull { it.normalName().substringAfter(':') == "navpoint" }
+                    ?.children()?.firstOrNull { it.normalName().substringAfter(':') == "content" }?.attr("src")
+                val href = ncxSrc ?: (listOf(owner) + owner.select("a[href]")).firstOrNull { it.hasAttr("href") }?.attr("href")
+                href?.takeIf { it.isNotBlank() }?.let(::target)
+            }
+            ParagraphRole.HEADING -> {
+                val id = (listOf(run.owner) + run.owner.parents()).firstOrNull { it.id().isNotEmpty() }?.id()
+                if (id != null) "$file#$id" else file
+            }
+            else -> null
+        }
     }
 
     /** A cell's table (numbered in reading order across the book), row and column. */

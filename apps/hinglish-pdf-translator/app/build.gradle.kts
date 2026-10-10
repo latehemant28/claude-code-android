@@ -133,4 +133,6 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     // The W3C EPUB validator: generated EPUBs must pass it.
     testImplementation("org.w3c:epubcheck:5.1.0")
+    // XLIFF 2 reader used by the Okapi filters plugin for OmegaT: checks the exported XLIFF loads.
+    testImplementation("net.sf.okapi.lib:okapi-lib-xliff2:1.47.0")
 }

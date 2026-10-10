@@ -14,6 +14,7 @@ import com.example.hinglishpdf.data.settings.AppPreferences
 import com.example.hinglishpdf.data.settings.ProviderSettings
 import android.util.Log
 import com.example.hinglishpdf.data.db.BookEntity
+import com.example.hinglishpdf.data.project.ProjectFiles
 import com.example.hinglishpdf.data.translate.ParagraphTranslator
 import com.example.hinglishpdf.pipeline.DocumentParser
 import com.example.hinglishpdf.pipeline.segment.ParsedDocument
@@ -145,6 +146,21 @@ class HinglishApp : Application() {
                 db.pipelineDao().deleteParagraphs(id)
                 db.pipelineDao().deleteDocument(id)
             }
+        }
+    }
+
+    /** Each book's XLIFF 2.1 project and skeleton, in the app's private folder. */
+    val projectFiles by lazy { ProjectFiles(File(filesDir, "projects")) { pipelineConfig } }
+
+    /** Rewrites the book's project files from its analysis and saved translations; never fails the caller. */
+    suspend fun writeProject(book: BookEntity) = withContext(Dispatchers.IO) {
+        try {
+            val doc = pipelineStore.load(book.id) ?: return@withContext
+            projectFiles.write(book, doc, db.pageDao().pages(book.id))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("HinglishApp", "Could not write the project files of book ${book.id}", e)
         }
     }
 

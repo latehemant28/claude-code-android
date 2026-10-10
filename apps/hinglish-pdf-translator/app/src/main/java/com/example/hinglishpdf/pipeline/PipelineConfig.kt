@@ -130,6 +130,17 @@ data class PipelineConfig(
     /** A word seen on its own at least this many times in the book counts as a standalone word. */
     val standaloneMinCount: Int = 2,
 
+    // ---------------------------------------------------------------- text units
+    /**
+     * A printed contents line: the title, then leader dots or spaces and a
+     * page number. Group 1 is the title, compared with the book's headings.
+     */
+    val tocLinePattern: String = "^(.*?)(?:[\\s.·…_-]+(?:\\d{1,4}|[ivxlc]{1,6}))?[\\s.·…_-]*$",
+    /** A line ending in leader dots and a page number ("Chapter One ...... 5") is an entry of its own. */
+    val leaderLinePattern: String = "^.*\\S[ .·…_]*[.·…_]{3,}[ .·…_]*(?:\\d{1,4}|[ivxlc]{1,6})$",
+    /** A page needs this many lines naming headings to count as a contents page. */
+    val tocMinEntries: Int = 2,
+
     // ---------------------------------------------------------------- chunking
     /** Whole paragraphs per request, at most. */
     val chunkMaxParagraphs: Int = 3,
@@ -145,6 +156,8 @@ data class PipelineConfig(
     @delegate:Transient val bullet by lazy { Regex(bulletPattern) }
     @delegate:Transient val numbered by lazy { Regex(numberedPattern) }
     @delegate:Transient val footnoteStart by lazy { Regex(footnoteStartPattern) }
+    @delegate:Transient val leaderLine by lazy { Regex(leaderLinePattern) }
+    @delegate:Transient val tocLine by lazy { Regex(tocLinePattern) }
     @delegate:Transient val standaloneWords by lazy { commonStandaloneWords.map { it.lowercase() }.toSet() }
 
     /** True if [text] ends finished: its last visible character is terminal punctuation. */

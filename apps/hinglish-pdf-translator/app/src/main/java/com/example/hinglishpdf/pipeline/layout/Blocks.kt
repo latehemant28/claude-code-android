@@ -9,8 +9,9 @@ import kotlin.math.abs
  * vertical gap over [PipelineConfig.paragraphGapRatio] times the measured
  * line spacing; a change of font tier; a heading, list item (bullet, or a
  * number where a list can start) or footnote starting; a jump back up; a
- * first-line indent; the shorter last line of a paragraph; and, in columns
- * of entries (addresses, contents), every line.
+ * first-line indent; the shorter last line of a paragraph; a contents entry
+ * ending in leader dots and a page number; and, in columns of entries
+ * (addresses, contents), every line.
  */
 internal class BlockBuilder(
     private val bodySize: Float,
@@ -64,6 +65,7 @@ internal class BlockBuilder(
                 }
                 line.box.x0 > prev.box.x0 + config.indentEm * line.size -> true // first-line indent
                 prev in lineByLine && line in lineByLine && !startsLowercase(line) -> true // one entry per line
+                config.leaderLine.matches(prev.text.trim()) -> true // a contents entry: "Chapter One ...... 5"
                 !fullLine && config.endsTerminally(prev.text) -> true // the last, shorter line of a paragraph
                 else -> false
             }

@@ -344,6 +344,19 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
         }
     }
 
+    /** The book's translation project as XLIFF 2.1 (plus its skeleton) in Downloads, for a CAT tool. */
+    fun exportXliff(book: BookEntity) {
+        app.appScope.launch {
+            val message = try {
+                "Saved to Downloads: " + app.exporter.exportXliff(book, app.projectFiles).joinToString(" and ")
+            } catch (e: Exception) {
+                val guide = ErrorGuide.of("Could not export the XLIFF. ${e.message.orEmpty()}")
+                "${guide.title}. ${guide.explanation}"
+            }
+            showMessage(message)
+        }
+    }
+
     /**
      * Removes the book from the list at once and offers Undo; it is deleted
      * for good only when the message goes away. A book being translated must

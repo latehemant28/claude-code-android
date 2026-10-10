@@ -165,7 +165,8 @@ internal class EpubPackage(private val zip: ZipFile) {
         }
     }
 
-    private fun resolve(base: String, href: String): String {
+    /** [href] (relative to the folder [base]) as a path inside the archive, without its #fragment. */
+    fun resolve(base: String, href: String): String {
         val decoded = URLDecoder.decode(href.substringBefore('#'), "UTF-8")
         val parts = ArrayDeque<String>()
         (if (base.isEmpty()) decoded else "$base/$decoded").split('/').forEach { part ->

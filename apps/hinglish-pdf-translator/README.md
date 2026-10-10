@@ -400,6 +400,26 @@ segmentation and paragraph-based translation are in place
   (page, box, character range) for PDF, (spine file, XPath, character
   range) for EPUB; cutting its text at the spans gives the source pieces
   back.
+- **Stage 3: text units and skeleton** ([`TextUnits.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/units/TextUnits.kt),
+  [`Xliff.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/units/Xliff.kt),
+  [`ProjectFiles.kt`](app/src/main/java/com/example/hinglishpdf/data/project/ProjectFiles.kt)),
+  after Okapi's filter / skeleton / text-unit model: every text element is
+  a text unit (front and back matter included; numbers alone marked not to
+  translate) with a code table for its inline codes (paired `{1}…{/1}`,
+  standalone `[[IMG_3]]`); running heads are one unit per text. The
+  skeleton keeps the rest: the element tree with slots pointing to unit ids,
+  every unit's source spans, furniture, page sizes and images, bookmarks
+  (for an EPUB the original archive is the rest). Contents entries are
+  linked to the headings they name (EPUB nav / NCX targets, printed
+  contents lines, PDF bookmarks). Each book's project is kept as **XLIFF
+  2.1** (`book.xlf`: groups for lists and tables, `<pc>` / `<ph>` with
+  `<originalData>`, kind, level, code labels and contents links in the
+  Metadata module, translations as targets) plus `skeleton.json`, written
+  after analysis, on pause and on completion. **Export XLIFF** on the book's
+  screen saves both to Downloads for OmegaT or another CAT tool. Tests check
+  the file against the OASIS schemas and load it with Okapi's XLIFF 2
+  reader (the library behind the Okapi plugin for OmegaT) at maximal
+  validation.
 - **Hyphenation** ([`Hyphenation.kt`](app/src/main/java/com/example/hinglishpdf/pipeline/assemble/Hyphenation.kt)):
   no dictionary is bundled. "contrap-" + "tions" joins when the book writes
   "contraptions" anywhere, or when the continuation is lower case and not a

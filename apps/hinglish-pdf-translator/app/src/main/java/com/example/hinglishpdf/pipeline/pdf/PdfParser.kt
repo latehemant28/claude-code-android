@@ -14,6 +14,8 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
+import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
+import com.google.gson.Gson
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.text.PDFTextStripper
@@ -58,6 +60,9 @@ object PdfParser {
                 put("tables", layout.tables.toString())
                 if (layout.columns.isNotEmpty()) put("multiColumnPages", layout.columns.keys.joinToString(","))
                 if (layout.boilerplatePages.isNotEmpty()) put("boilerplatePages", layout.boilerplatePages.joinToString(","))
+                // For the skeleton: page sizes and images, and the bookmarks (title, page).
+                put("pageGeometry", Gson().toJson(pages.map { p -> PageGeometry(p.page, p.width, p.height, p.imageBoxes) }))
+                outline(doc).takeIf { it.isNotEmpty() }?.let { put("outline", Gson().toJson(it)) }
             }
             ParsedDocument(
                 title = metadata["title"],
@@ -71,6 +76,22 @@ object PdfParser {
                 segments = Segmenter.segment(paragraphs),
             )
         }
+    }
+
+    /** The PDF's bookmarks, depth first: title and the page it opens. */
+    internal fun outline(doc: PDDocument): List<OutlineEntry> {
+        val out = mutableListOf<OutlineEntry>()
+        fun walk(item: PDOutlineItem?, depth: Int) {
+            var current = item
+            while (current != null) {
+                val page = runCatching { current.findDestinationPage(doc)?.let { doc.pages.indexOf(it) + 1 } }.getOrNull()
+                current.title?.takeIf { it.isNotBlank() }?.let { out += OutlineEntry(it.trim(), page ?: 0, depth) }
+                walk(current.firstChild, depth + 1)
+                current = current.nextSibling
+            }
+        }
+        walk(doc.documentCatalog?.documentOutline?.firstChild, 0)
+        return out
     }
 
     internal fun readGlyphs(doc: PDDocument, onPage: (page: Int, pageCount: Int) -> Unit = { _, _ -> }): List<PdfPageGlyphs> {
@@ -173,3 +194,9 @@ object PdfParser {
         override fun close() = Unit
     }
 }
+
+/** A page's size and where it draws images, for the skeleton. */
+data class PageGeometry(val page: Int, val width: Float, val height: Float, val images: List<com.example.hinglishpdf.pipeline.segment.Box>)
+
+/** A bookmark: its title, the page it opens (0 if none) and its depth. */
+data class OutlineEntry(val title: String, val page: Int, val depth: Int)
