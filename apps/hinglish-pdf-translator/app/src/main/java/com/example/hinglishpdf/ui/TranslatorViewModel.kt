@@ -207,7 +207,28 @@ class TranslatorViewModel(private val app: HinglishApp) : ViewModel() {
     fun saveApiKey(provider: AIProvider, key: String) {
         app.providers.saveKey(provider, key)
         _providerSheet.value = false
-        showMessage("${provider.displayName} API key saved on this phone")
+        _keySaved.value = provider
+    }
+
+    /**
+     * A key captured automatically (copied in the in-app browser, or found on
+     * the clipboard): saved at once for the provider it belongs to, which
+     * becomes the selected one; the sheet closes and the success screen shows.
+     */
+    fun autoSaveKey(provider: AIProvider, key: String) {
+        app.providers.saveKey(provider, key)
+        if (!state.value.live.running) app.providers.select(provider)
+        _providerSheet.value = false
+        _keySaved.value = provider
+    }
+
+    private val _keySaved = MutableStateFlow<AIProvider?>(null)
+
+    /** Set right after a key is saved: shows "✅ API Key Saved Successfully!". */
+    val keySaved: StateFlow<AIProvider?> = _keySaved.asStateFlow()
+
+    fun keySavedShown() {
+        _keySaved.value = null
     }
 
     fun removeApiKey(provider: AIProvider) = app.providers.clearKey(provider)

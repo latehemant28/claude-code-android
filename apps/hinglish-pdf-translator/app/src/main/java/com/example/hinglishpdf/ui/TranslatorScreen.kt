@@ -101,6 +101,7 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
     /** Runs once the Terms are accepted (the translation the user was starting). */
     var afterTerms by remember { mutableStateOf<(() -> Unit)?>(null) }
     val providerSheet by viewModel.providerSheet.collectAsStateWithLifecycle()
+    val keySaved by viewModel.keySaved.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -157,10 +158,13 @@ fun TranslatorScreen(viewModel: TranslatorViewModel, onShowTutorial: () -> Unit 
             onDismiss = { viewModel.showProviderSheet(false) },
             onSelect = viewModel::selectProvider,
             onSaveKey = viewModel::saveApiKey,
+            onAutoSaveKey = viewModel::autoSaveKey,
             onRemoveKey = viewModel::removeApiKey,
             onSetModel = viewModel::setModel,
         )
     }
+
+    keySaved?.let { provider -> KeySavedCelebration(provider, onDone = viewModel::keySavedShown) }
 
     if (showTextSettings) {
         ReaderSettingsSheet(

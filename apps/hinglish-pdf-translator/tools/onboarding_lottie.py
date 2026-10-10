@@ -117,8 +117,8 @@ def star(points, outer, inner, x=0, y=0, rotation=0):
             "ir": static(inner), "is": static(0), "or": static(outer), "os": static(0)}
 
 
-def layer(name, shapes, p=(0, 0), a=(0, 0), s=(100, 100), r=0, o=100):
-    return {"ddd": 0, "ty": 4, "nm": name, "sr": 1, "ao": 0, "ip": 0, "op": OP, "st": 0, "bm": 0,
+def layer(name, shapes, p=(0, 0), a=(0, 0), s=(100, 100), r=0, o=100, op=None):
+    return {"ddd": 0, "ty": 4, "nm": name, "sr": 1, "ao": 0, "ip": 0, "op": op or OP, "st": 0, "bm": 0,
             "ks": {"p": prop(list(p) + [0] if not isinstance(p, dict) else p),
                    "a": prop(list(a) + [0]),
                    "s": prop(list(s) + [100] if not isinstance(s, dict) else s),
@@ -126,12 +126,12 @@ def layer(name, shapes, p=(0, 0), a=(0, 0), s=(100, 100), r=0, o=100):
             "shapes": shapes}
 
 
-def composition(name, layers):
+def composition(name, layers, op=None, fr=None, w=None, h=None):
     # Lottie draws the first layer on top: callers list layers bottom-up, so reverse.
     layers = list(reversed(layers))
     for i, l in enumerate(layers):
         l["ind"] = i + 1
-    return {"v": "5.7.4", "fr": FPS, "ip": 0, "op": OP, "w": W, "h": H, "nm": name, "ddd": 0,
+    return {"v": "5.7.4", "fr": fr or FPS, "ip": 0, "op": op or OP, "w": w or W, "h": h or H, "nm": name, "ddd": 0,
             "assets": [], "layers": layers, "markers": []}
 
 
@@ -180,6 +180,54 @@ class LottiePen(BasePen):
         self.cur = None
 
     _endPath = _closePath
+
+
+def contour_shapes(contours, transform):
+    """Pen contours as Lottie paths; [transform] maps a point (x, y) -> (x', y') and a tangent likewise."""
+    point, vector = transform
+    shapes = []
+    for c in contours:
+        shapes.append({"ty": "sh", "ks": static({
+            "c": True,
+            "v": [[round(v, 2) for v in point(x, y)] for x, y in c["v"]],
+            "i": [[round(v, 2) for v in vector(x, y)] for x, y in c["i"]],
+            "o": [[round(v, 2) for v in vector(x, y)] for x, y in c["o"]],
+        })})
+    return shapes
+
+
+def text_shapes(font_path, text, size, location=None):
+    """[text] in one line as Lottie paths, [size] px em, centred on (0, 0) (by advance width and cap height)."""
+    font = TTFont(font_path)
+    glyph_set = font.getGlyphSet(location=location) if location else font.getGlyphSet()
+    cmap = font.getBestCmap()
+    scale = size / font["head"].unitsPerEm
+    contours, x = [], 0
+    for ch in text:
+        if ch == " ":
+            x += glyph_set[cmap[32]].width
+            continue
+        name = cmap[ord(ch)]
+        pen = LottiePen(glyph_set)
+        glyph_set[name].draw(pen)
+        for c in pen.contours:
+            c["v"] = [(px + x, py) for px, py in c["v"]]
+            contours.append(c)
+        x += glyph_set[name].width
+    cap = getattr(font["OS/2"], "sCapHeight", 0) or font["head"].unitsPerEm * 0.7
+    cx, cy = x / 2, cap / 2
+    return contour_shapes(contours, (lambda px, py: (( px - cx) * scale, -(py - cy) * scale),
+                                     lambda px, py: (px * scale, -py * scale))), x * scale
+
+
+def svg_shapes(d, size, viewbox=24):
+    """An SVG path (e.g. a Material icon, 24 x 24 viewBox) as Lottie paths, [size] px, centred on (0, 0)."""
+    from fontTools.svgLib.path import parse_path
+    pen = LottiePen(None)
+    parse_path(d, pen)
+    k = size / viewbox
+    return contour_shapes(pen.contours, (lambda x, y: ((x - viewbox / 2) * k, (y - viewbox / 2) * k),
+                                         lambda x, y: (x * k, y * k)))
 
 
 def glyph_shapes(font_path, char, size, location=None):

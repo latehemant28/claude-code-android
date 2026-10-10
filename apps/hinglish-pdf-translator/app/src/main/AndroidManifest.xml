@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- "Translating page 45 of 300..." (runtime permission on Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The success buzz when an API key is captured (a normal permission, granted at install). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!--
         Storage: none needed. Books are opened through the system file picker

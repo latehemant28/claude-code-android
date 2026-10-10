@@ -14,7 +14,12 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.rememberModalBottomSheetState
+import android.view.ViewTreeObserver
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import com.example.hinglishpdf.data.ai.ApiKeyDetector
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Column
@@ -107,12 +112,13 @@ fun ProviderSettingsSheet(
     onDismiss: () -> Unit,
     onSelect: (AIProvider) -> Unit,
     onSaveKey: (AIProvider, String) -> Unit,
+    onAutoSaveKey: (AIProvider, String) -> Unit,
     onRemoveKey: (AIProvider) -> Unit,
     onSetModel: (AIProvider, String) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        ProviderSettingsContent(settings, activeModel, busy, onSelect, onSaveKey, onRemoveKey, onSetModel)
+        ProviderSettingsContent(settings, activeModel, busy, onSelect, onSaveKey, onRemoveKey, onSetModel, onAutoSaveKey)
     }
 }
 
@@ -126,21 +132,47 @@ fun ProviderSettingsContent(
     onSaveKey: (AIProvider, String) -> Unit,
     onRemoveKey: (AIProvider) -> Unit,
     onSetModel: (AIProvider, String) -> Unit,
+    onAutoSaveKey: (AIProvider, String) -> Unit = onSaveKey,
 ) {
     val provider = settings.provider
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     var browserOpen by rememberSaveable { mutableStateOf(false) }
     var key by rememberSaveable(provider) { mutableStateOf("") }
     var pasted by rememberSaveable(provider) { mutableStateOf(false) }
 
     if (browserOpen) {
-        ApiKeyBrowser(provider) { copied ->
-            browserOpen = false
-            if (copied != null && !settings.configured) {
-                key = copied
-                pasted = true
+        ApiKeyBrowser(
+            provider,
+            onKeyCaptured = { owner, captured ->
+                browserOpen = false
+                onAutoSaveKey(owner, captured)
+            },
+            onClose = { copied ->
+                browserOpen = false
+                if (copied != null && !settings.configured) {
+                    key = copied
+                    pasted = true
+                }
+            },
+        )
+    }
+
+    // Back from another app (e.g. the browser fallback) with a key on the clipboard: save it.
+    val view = LocalView.current
+    DisposableEffect(view, settings) {
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (focused && !browserOpen) {
+                ApiKeyDetector.detect(clipboardText(context), provider)?.let { (owner, found) ->
+                    if (settings.key(owner) != found) {
+                        clearClipboard(context)
+                        onAutoSaveKey(owner, found)
+                    }
+                }
             }
         }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose { view.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
     }
 
     Column(
